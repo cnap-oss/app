@@ -91,6 +91,7 @@ func (r *Repository) UpdateAgent(ctx context.Context, agent *Agent) error {
 		Where("agent_id = ?", agent.AgentID).
 		Updates(map[string]interface{}{
 			"description": agent.Description,
+			"provider":    agent.Provider,
 			"model":       agent.Model,
 			"prompt":      agent.Prompt,
 			"updated_at":  time.Now(),

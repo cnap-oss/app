@@ -211,7 +211,8 @@ func (s *Server) handleModal(i *discordgo.InteractionCreate) {
 	switch {
 	case customID == prefixModalCreate:
 		// Assume controller's CreateAgent will handle conflicts (e.g., already exists)
-		if err := s.controller.CreateAgent(ctx, name, desc, model, prompt); err != nil {
+		// Discord 봇에서는 기본 provider로 "opencode" 사용
+		if err := s.controller.CreateAgent(ctx, name, desc, "opencode", model, prompt); err != nil {
 			s.logger.Error("Failed to create agent via controller", zap.Error(err))
 			s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 '**%s**'을(를) 생성하는 데 실패했어요. 에러: %v", name, err))
 			return
@@ -220,7 +221,8 @@ func (s *Server) handleModal(i *discordgo.InteractionCreate) {
 	case strings.HasPrefix(customID, prefixModalEdit):
 		originalName := strings.TrimPrefix(customID, prefixModalEdit)
 		// Assumes an UpdateAgent function exists in the controller that can handle renames.
-		if err := s.controller.UpdateAgent(ctx, originalName, desc, model, prompt); err != nil {
+		// Discord 봇에서는 기본 provider로 "opencode" 사용
+		if err := s.controller.UpdateAgent(ctx, originalName, desc, "opencode", model, prompt); err != nil {
 			s.logger.Error("Failed to update agent via controller", zap.Error(err), zap.String("original_agent_id", originalName))
 			s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 '**%s**'을(를) 수정하는 데 실패했어요. 에러: %v", originalName, err))
 			return

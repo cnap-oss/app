@@ -7,6 +7,7 @@ type Agent struct {
 	ID          int64     `gorm:"column:id;type:bigserial;primaryKey"`
 	AgentID     string    `gorm:"column:agent_id;type:varchar(64);not null;uniqueIndex:idx_agents_agent_id"`
 	Description string    `gorm:"column:description;type:text"`
+	Provider    string    `gorm:"column:provider;type:varchar(32);not null;default:'opencode'"`
 	Model       string    `gorm:"column:model;type:varchar(64)"`
 	Prompt      string    `gorm:"column:prompt;type:text"`
 	Status      string    `gorm:"column:status;type:varchar(32);not null;default:'active'"`

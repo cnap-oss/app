@@ -47,7 +47,7 @@ func TestControllerCreateAndGetAgent(t *testing.T) {
 
 	ctx := context.Background()
 
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-x", "Test agent", "gpt-4", "Test prompt"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-x", "Test agent", "opencode", "gpt-4", "Test prompt"))
 
 	info, err := ctrl.GetAgentInfo(ctx, "agent-x")
 	require.NoError(t, err)
@@ -63,8 +63,8 @@ func TestControllerListAgents(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-a", "Agent A", "gpt-4", "Prompt A"))
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-b", "Agent B", "gpt-3", "Prompt B"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-a", "Agent A", "opencode", "gpt-4", "Prompt A"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-b", "Agent B", "opencode", "gpt-3", "Prompt B"))
 
 	agents, err := ctrl.ListAgents(ctx)
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestControllerCreateTaskWithPrompt(t *testing.T) {
 	ctx := context.Background()
 
 	// Agent 생성
-	require.NoError(t, ctrl.CreateAgent(ctx, "chatbot", "Chatbot agent", "gpt-4", "You are a helpful assistant"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "chatbot", "Chatbot agent", "opencode", "gpt-4", "You are a helpful assistant"))
 
 	// Task 생성 with prompt
 	require.NoError(t, ctrl.CreateTask(ctx, "chatbot", "task-001", "Hello, how are you?"))
@@ -103,7 +103,7 @@ func TestControllerCreateTaskWithoutPrompt(t *testing.T) {
 	ctx := context.Background()
 
 	// Agent 생성
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "opencode", "gpt-4", "System prompt"))
 
 	// Task 생성 without prompt
 	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-empty", ""))
@@ -122,7 +122,7 @@ func TestControllerAddMessage(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "opencode", "gpt-4", "System prompt"))
 	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-001", "Initial prompt"))
 
 	// Add messages
@@ -153,7 +153,7 @@ func TestControllerSendMessage(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "opencode", "gpt-4", "System prompt"))
 	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-001", "Hello"))
 
 	// SendMessage should change status to running
@@ -178,7 +178,7 @@ func TestControllerSendMessageWithoutPromptOrMessages(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup - Task without prompt
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "opencode", "gpt-4", "System prompt"))
 	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-empty", ""))
 
 	// SendMessage should fail - no prompt or messages
@@ -196,7 +196,7 @@ func TestControllerMultiTurnConversation(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Agent 생성 (시스템 프롬프트)
-	require.NoError(t, ctrl.CreateAgent(ctx, "chatbot", "Friendly chatbot", "gpt-4", "You are a helpful assistant"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "chatbot", "Friendly chatbot", "opencode", "gpt-4", "You are a helpful assistant"))
 
 	// 2. Task 생성 (대화 세션)
 	require.NoError(t, ctrl.CreateTask(ctx, "chatbot", "session-001", "안녕하세요"))
@@ -244,7 +244,7 @@ func TestControllerCreateTask_RunnerManagerIntegration(t *testing.T) {
 	ctx := context.Background()
 
 	// Create agent
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-test", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-test", "Test agent", "opencode", "gpt-4", "System prompt"))
 
 	// Create task - should register runner in RunnerManager
 	require.NoError(t, ctrl.CreateTask(ctx, "agent-test", "task-runner-test", "Test prompt"))
@@ -266,7 +266,7 @@ func TestControllerSendMessage_PreventDuplicateExecution(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "opencode", "gpt-4", "System prompt"))
 	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-dup", "Hello"))
 
 	// First SendMessage
@@ -293,7 +293,7 @@ func TestControllerCancelTask(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "opencode", "gpt-4", "System prompt"))
 	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-cancel", "Long running task"))
 
 	// Start task
@@ -322,7 +322,7 @@ func TestControllerCancelTask_NotRunning(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup - use unique agent ID to avoid conflicts
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-notrunning", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-notrunning", "Test agent", "opencode", "gpt-4", "System prompt"))
 	require.NoError(t, ctrl.CreateTask(ctx, "agent-notrunning", "task-not-running", "Task"))
 
 	// Try to cancel a pending task (not running)
@@ -361,7 +361,7 @@ func TestControllerSendMessage_RunnerAutoRecreation(t *testing.T) {
 	runnerMgr := taskrunner.GetRunnerManager()
 
 	// 1. Agent 및 Task 생성
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-recreate", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-recreate", "Test agent", "opencode", "gpt-4", "System prompt"))
 	require.NoError(t, ctrl.CreateTask(ctx, "agent-recreate", "task-recreate", "Hello"))
 
 	// 2. Runner가 생성되었는지 확인

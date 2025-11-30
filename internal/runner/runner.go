@@ -16,9 +16,10 @@ import (
 
 // AgentInfo는 에이전트 실행에 필요한 정보를 담는 구조체입니다.
 type AgentInfo struct {
-	AgentID string
-	Model   string
-	Prompt  string
+	AgentID  string
+	Provider string
+	Model    string
+	Prompt   string
 }
 
 // StatusCallback은 Task 실행 중 상태 변경을 Controller에 알리기 위한 콜백 인터페이스입니다.
@@ -39,6 +40,7 @@ const defaultBaseURL = "https://opencode.ai/zen/v1"
 type Runner struct {
 	ID         string
 	Status     string
+	agentInfo  AgentInfo
 	logger     *zap.Logger
 	apiKey     string
 	baseURL    string
@@ -119,20 +121,105 @@ func NewRunner(logger *zap.Logger, opts ...RunnerOption) *Runner {
 	return r
 }
 
-// RunWithResult는 프롬프트를 OpenCode Zen API의 chat/completions 엔드포인트로 보내고 결과를 반환합니다.
+// getAPIKeyForProvider는 provider에 맞는 API 키를 환경 변수에서 가져옵니다.
+func getAPIKeyForProvider(provider string) (string, error) {
+	var envKey string
+	switch provider {
+	case "opencode":
+		envKey = "OPEN_CODE_API_KEY"
+	case "gemini":
+		envKey = "GEMINI_API_KEY"
+	case "claude":
+		envKey = "ANTHROPIC_API_KEY"
+	case "openai":
+		envKey = "OPENAI_API_KEY"
+	case "xai":
+		envKey = "XAI_API_KEY"
+	default:
+		return "", fmt.Errorf("unsupported provider: %s", provider)
+	}
+
+	apiKey := os.Getenv(envKey)
+	if apiKey == "" {
+		return "", fmt.Errorf("환경 변수 %s가 설정되어 있지 않습니다", envKey)
+	}
+
+	return apiKey, nil
+}
+
+// getEndpointForProvider는 provider에 맞는 API endpoint를 반환합니다.
+func getEndpointForProvider(provider string) (string, error) {
+	switch provider {
+	case "opencode":
+		return "https://opencode.ai/zen/v1/chat/completions", nil
+	case "gemini":
+		// Gemini API endpoint (Google AI Studio)
+		return "https://generativelanguage.googleapis.com/v1/models", nil
+	case "claude":
+		// Anthropic API endpoint
+		return "https://api.anthropic.com/v1/messages", nil
+	case "openai":
+		// OpenAI API endpoint
+		return "https://api.openai.com/v1/chat/completions", nil
+	case "xai":
+		// xAI API endpoint
+		return "https://api.x.ai/v1/chat/completions", nil
+	default:
+		return "", fmt.Errorf("unsupported provider: %s", provider)
+	}
+}
+
+// RunWithResult는 프롬프트를 AI API 엔드포인트로 보내고 결과를 반환합니다.
+// provider에 따라 다른 API를 호출합니다.
 func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) (*RunResult, error) {
+	// agentInfo에서 provider 가져오기 (없으면 기본값 opencode)
+	provider := r.agentInfo.Provider
+	if provider == "" {
+		provider = "opencode"
+	}
+
 	promptPreview := prompt
 	if len(promptPreview) > 200 {
 		promptPreview = promptPreview[:200] + "..."
 	}
 
-	// 요청 정보 로그 출력
-	r.logger.Info("Sending request to OpenCode Zen API (Chat Completions endpoint)",
+	r.logger.Info("Sending request to AI API",
+		zap.String("provider", provider),
 		zap.String("model", model),
 		zap.String("name", name),
 		zap.String("prompt_preview", promptPreview),
 	)
 
+	// Provider에 맞는 API 키 가져오기
+	apiKey, err := getAPIKeyForProvider(provider)
+	if err != nil {
+		return nil, fmt.Errorf("API 키 조회 실패: %w", err)
+	}
+
+	// Provider에 맞는 endpoint 가져오기
+	endpoint, err := getEndpointForProvider(provider)
+	if err != nil {
+		return nil, fmt.Errorf("endpoint 조회 실패: %w", err)
+	}
+
+	// Provider별 API 호출
+	switch provider {
+	case "opencode", "openai", "xai":
+		// OpenAI 호환 API (opencode, openai, xai 모두 동일한 포맷)
+		return r.callOpenAICompatibleAPI(ctx, endpoint, apiKey, model, name, prompt)
+	case "claude":
+		// Anthropic Claude API (추후 구현)
+		return nil, fmt.Errorf("claude API는 아직 구현되지 않았습니다. opencode provider를 사용하여 claude 모델을 실행할 수 있습니다")
+	case "gemini":
+		// Google Gemini API (추후 구현)
+		return nil, fmt.Errorf("gemini API는 아직 구현되지 않았습니다. opencode provider를 사용하여 gemini 모델을 실행할 수 있습니다")
+	default:
+		return nil, fmt.Errorf("지원하지 않는 provider: %s", provider)
+	}
+}
+
+// callOpenAICompatibleAPI는 OpenAI 호환 API를 호출합니다 (opencode, openai, xai).
+func (r *Runner) callOpenAICompatibleAPI(ctx context.Context, endpoint, apiKey, model, name, prompt string) (*RunResult, error) {
 	// 요청 본문 구성
 	reqBody := OpenCodeRequest{
 		Model: model,
@@ -146,14 +233,13 @@ func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) 
 		return nil, fmt.Errorf("요청 바디 직렬화 실패: %w", err)
 	}
 
-	endpoint := strings.TrimRight(r.baseURL, "/") + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("요청 생성 실패: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+r.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	client := r.httpClient
 	if client == nil {
@@ -196,7 +282,7 @@ func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) 
 		output = apiResp.Choices[0].Message.Content
 	}
 
-	r.logger.Info("OpenCode 응답 수신 완료",
+	r.logger.Info("AI API 응답 수신 완료",
 		zap.String("output_preview", summarizeBody([]byte(output))),
 	)
 
