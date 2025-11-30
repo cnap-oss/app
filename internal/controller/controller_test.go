@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/cnap-oss/app/internal/controller"
@@ -15,6 +16,9 @@ import (
 func newTestController(t *testing.T) (*controller.Controller, func()) {
 	t.Helper()
 
+	// Set mock API key for testing
+	_ = os.Setenv("OPEN_CODE_API_KEY", "test-api-key")
+
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, storage.AutoMigrate(db))
@@ -25,6 +29,7 @@ func newTestController(t *testing.T) (*controller.Controller, func()) {
 	ctrl := controller.NewController(zaptest.NewLogger(t), repo)
 
 	cleanup := func() {
+		_ = os.Unsetenv("OPEN_CODE_API_KEY")
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
