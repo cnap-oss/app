@@ -137,9 +137,30 @@ go build -o cnap ./cmd/cnap
 
 저장소 동작과 컨트롤러 흐름은 GORM의 인메모리(SQLite) 드라이버를 활용한 단위 테스트로 검증됩니다.
 
+#### 단위 테스트
+
 ```bash
+# 모든 단위 테스트 실행
 go test ./...
+
+# 커버리지와 함께 실행
+make test-coverage
 ```
+
+#### 통합 테스트
+
+CLI 통합 테스트는 전체 플로우(Agent 생성 → Task 실행 → 상태 확인)를 검증합니다.
+
+```bash
+# 사전 준비: PostgreSQL 실행 및 환경 변수 설정
+export DATABASE_URL="postgres://cnap:cnap@localhost:5432/cnap_test?sslmode=disable"
+export OPEN_CODE_API_KEY="your-api-key"
+
+# 통합 테스트 실행
+./scripts/integration_test.sh
+```
+
+자세한 내용은 [통합 테스트 가이드](docs/integration_testing.md)를 참고하세요.
 
 ## 데이터베이스 설정
 
