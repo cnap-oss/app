@@ -133,7 +133,32 @@ make build
 go build -o cnap ./cmd/cnap
 ```
 
-### 5. 테스트
+### 5. CLI 빠른 시작
+
+CNAP CLI를 사용한 기본 파이프라인입니다. 자세한 내용은 [CLI 빠른 시작 가이드](docs/cli-quickstart-guide.md)를 참고하세요.
+
+```bash
+# 환경 변수 설정
+export OPEN_CODE_API_KEY="your-api-key"
+
+# Agent 생성
+echo -e "my-bot\nAI 비서\ngpt-4\n친절한 AI입니다" | ./bin/cnap agent create
+
+# Task 생성 및 실행
+./bin/cnap task create my-bot task-001 --prompt "안녕하세요"
+./bin/cnap task send task-001
+
+# 상태 확인
+./bin/cnap task view task-001
+```
+
+**주요 기능:**
+- ✅ 프로세스 재시작 후에도 Task 실행 가능 (Runner 자동 재생성)
+- ✅ SQLite 기본 지원 (별도 DB 설정 불필요)
+- ✅ 멀티턴 대화 지원
+- ✅ 메시지 파일 시스템 저장
+
+### 6. 테스트
 
 저장소 동작과 컨트롤러 흐름은 GORM의 인메모리(SQLite) 드라이버를 활용한 단위 테스트로 검증됩니다.
 
