@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	taskrunner "github.com/cnap-oss/app/internal/runner"
@@ -15,11 +16,19 @@ import (
 	"gorm.io/gorm"
 )
 
+// TaskContext는 Task별 실행 컨텍스트를 관리합니다.
+type TaskContext struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
 // Controller는 에이전트 생성 및 관리를 담당하며, supervisor 기능도 포함합니다.
 type Controller struct {
 	logger        *zap.Logger
 	repo          *storage.Repository
 	runnerManager *taskrunner.RunnerManager
+	taskContexts  map[string]*TaskContext
+	mu            sync.RWMutex
 }
 
 // NewController는 새로운 Controller를 생성합니다.
@@ -28,6 +37,7 @@ func NewController(logger *zap.Logger, repo *storage.Repository) *Controller {
 		logger:        logger,
 		repo:          repo,
 		runnerManager: taskrunner.GetRunnerManager(),
+		taskContexts:  make(map[string]*TaskContext),
 	}
 }
 
@@ -554,8 +564,63 @@ func (c *Controller) SendMessage(ctx context.Context, taskID string) error {
 		zap.Int("message_count", len(messages)),
 	)
 
+	// Task 실행을 위한 context 생성 (5분 타임아웃)
+	taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+
+	// TaskContext 저장
+	c.mu.Lock()
+	c.taskContexts[taskID] = &TaskContext{
+		ctx:    taskCtx,
+		cancel: cancel,
+	}
+	c.mu.Unlock()
+
 	// RunnerManager를 통해 실제 실행 트리거
-	go c.executeTask(context.Background(), taskID, task)
+	go c.executeTask(taskCtx, taskID, task)
+
+	return nil
+}
+
+// CancelTask는 실행 중인 Task를 취소합니다.
+func (c *Controller) CancelTask(ctx context.Context, taskID string) error {
+	c.logger.Info("Canceling task",
+		zap.String("task_id", taskID),
+	)
+
+	if c.repo == nil {
+		return fmt.Errorf("controller: repository is not configured")
+	}
+
+	// Task 조회
+	task, err := c.repo.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("task not found: %s", taskID)
+		}
+		return err
+	}
+
+	// running 상태가 아니면 취소 불가
+	if task.Status != storage.TaskStatusRunning {
+		return fmt.Errorf("task is not running: %s (status: %s)", taskID, task.Status)
+	}
+
+	// TaskContext에서 cancel 호출
+	c.mu.RLock()
+	taskCtx, ok := c.taskContexts[taskID]
+	c.mu.RUnlock()
+
+	if !ok {
+		// Context가 없으면 이미 완료되었거나 존재하지 않음
+		return fmt.Errorf("task context not found: %s", taskID)
+	}
+
+	// Context 취소
+	taskCtx.cancel()
+
+	c.logger.Info("Task canceled",
+		zap.String("task_id", taskID),
+	)
 
 	return nil
 }
@@ -563,13 +628,21 @@ func (c *Controller) SendMessage(ctx context.Context, taskID string) error {
 // executeTask는 Task를 비동기로 실행합니다.
 func (c *Controller) executeTask(ctx context.Context, taskID string, task *storage.Task) {
 	defer func() {
+		// TaskContext 정리
+		c.mu.Lock()
+		if taskCtx, ok := c.taskContexts[taskID]; ok {
+			taskCtx.cancel()
+			delete(c.taskContexts, taskID)
+		}
+		c.mu.Unlock()
+
 		if r := recover(); r != nil {
 			c.logger.Error("Task execution panicked",
 				zap.String("task_id", taskID),
 				zap.Any("panic", r),
 			)
 			// 상태를 failed로 변경
-			_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+			_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusFailed)
 		}
 	}()
 
@@ -626,6 +699,24 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 
 	// TaskRunner 실행 (callback이 상태 변경과 결과 저장 처리)
 	result, err := runner.Run(ctx, req)
+
+	// Context 취소/타임아웃 확인
+	if ctx.Err() != nil {
+		c.logger.Warn("Task execution canceled or timed out",
+			zap.String("task_id", taskID),
+			zap.Error(ctx.Err()),
+		)
+		// 상태를 canceled 또는 failed로 변경
+		status := storage.TaskStatusFailed
+		if errors.Is(ctx.Err(), context.Canceled) {
+			status = storage.TaskStatusCanceled
+		}
+		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, status)
+
+		// 실행 완료 후 TaskRunner 정리
+		c.runnerManager.DeleteRunner(taskID)
+		return
+	}
 
 	// 로그 출력
 	if err != nil {

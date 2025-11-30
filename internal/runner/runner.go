@@ -160,15 +160,53 @@ func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) 
 		client = &http.Client{Timeout: 20 * time.Second}
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API 요청 실패: %w", err)
-	}
-	defer resp.Body.Close()
+	// 재시도 로직 (최대 3회)
+	maxRetries := 3
+	var resp *http.Response
+	var bodyBytes []byte
 
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("응답 읽기 실패: %w", err)
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err = client.Do(req)
+		if err != nil {
+			r.logger.Warn("API request failed",
+				zap.Int("attempt", attempt),
+				zap.Error(err),
+			)
+			// 네트워크 에러는 재시도
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(attempt) * time.Second)
+				continue
+			}
+			return nil, fmt.Errorf("API 요청 실패 (재시도 %d회): %w", maxRetries, err)
+		}
+
+		bodyBytes, err = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("응답 읽기 실패: %w", err)
+		}
+
+		// 500번대 에러는 재시도
+		if resp.StatusCode >= 500 && attempt < maxRetries {
+			r.logger.Warn("Server error, retrying",
+				zap.Int("status_code", resp.StatusCode),
+				zap.Int("attempt", attempt),
+			)
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
+		}
+
+		// 429 (Rate Limit)는 재시도
+		if resp.StatusCode == 429 && attempt < maxRetries {
+			r.logger.Warn("Rate limited, retrying",
+				zap.Int("attempt", attempt),
+			)
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+			continue
+		}
+
+		// 성공 또는 재시도 불가능한 에러
+		break
 	}
 
 	contentType := resp.Header.Get("Content-Type")
