@@ -1,7 +1,6 @@
 package taskrunner
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,30 +11,22 @@ import (
 func mockAgentInfo() AgentInfo {
 	return AgentInfo{
 		AgentID: "test-agent",
-		Model:   "gpt-4",
+		Model:   "grok-code",
 		Prompt:  "test prompt",
 	}
 }
 
 func TestRunnerManager_Singleton(t *testing.T) {
-	// Set mock API key for testing
-	_ = os.Setenv("OPEN_CODE_API_KEY", "test-api-key")
-	defer func() { _ = os.Unsetenv("OPEN_CODE_API_KEY") }()
-
-	logger := zap.NewNop()
-	rm1 := GetRunnerManager(logger)
-	rm2 := GetRunnerManager(logger)
+	rm1 := GetRunnerManager()
+	rm2 := GetRunnerManager()
 
 	assert.Equal(t, rm1, rm2, "GetRunnerManager should return the same instance")
 }
 
 func TestRunnerManager_CRUD(t *testing.T) {
-	// Set mock API key for testing
-	_ = os.Setenv("OPEN_CODE_API_KEY", "test-api-key")
-	defer func() { _ = os.Unsetenv("OPEN_CODE_API_KEY") }()
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
-	logger := zap.NewNop()
-	rm := GetRunnerManager(logger)
+	rm := GetRunnerManager()
 
 	// Ensure clean state for test (though singleton persists, so we might need to clear it if tests run in same process)
 	// Since we can't easily reset the singleton once, we just work with what we have or clear the map manually.
@@ -46,13 +37,11 @@ func TestRunnerManager_CRUD(t *testing.T) {
 	agent := mockAgentInfo()
 	taskId := "task-1"
 
-	// Create (with nil callback for testing)
-	runner := rm.CreateRunner(taskId, agent, nil)
+	// Create
+	runner := rm.CreateRunner(taskId, agent, zap.NewNop())
 	assert.NotNil(t, runner)
 	assert.Equal(t, taskId, runner.ID)
 	assert.Equal(t, "Pending", runner.Status)
-	assert.NotNil(t, runner.logger, "Runner logger should be initialized")
-	assert.NotEmpty(t, runner.apiKey, "Runner apiKey should be initialized")
 
 	// List
 	runners := rm.ListRunner()

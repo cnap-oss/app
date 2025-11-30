@@ -42,16 +42,8 @@ func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
 
 	// API 호출
 	result, err := r.RunWithResult(ctx, req.Model, req.TaskID, prompt)
-
-	// 에러 발생 시 callback 호출
-	if err != nil && r.callback != nil {
-		_ = r.callback.OnError(req.TaskID, err)
+	if err != nil {
 		return nil, err
-	}
-
-	// 성공 시 callback 호출
-	if result != nil && r.callback != nil {
-		_ = r.callback.OnComplete(req.TaskID, result)
 	}
 
 	return result, nil
