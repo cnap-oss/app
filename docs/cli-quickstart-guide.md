@@ -4,7 +4,9 @@ CNAP CLI를 사용한 실전 파이프라인 가이드입니다. 이 문서는 A
 
 ## 목차
 - [사전 준비](#사전-준비)
+- [지원 AI 모델](#지원-ai-모델)
 - [기본 파이프라인](#기본-파이프라인)
+- [멀티 프로바이더 사용법](#멀티-프로바이더-사용법)
 - [멀티턴 대화 파이프라인](#멀티턴-대화-파이프라인)
 - [고급 사용법](#고급-사용법)
 - [문제 해결](#문제-해결)
@@ -24,13 +26,23 @@ go build -o bin/cnap ./cmd/cnap
 
 ### 2. 환경 변수 설정
 
+CNAP은 여러 AI 프로바이더를 지원합니다. 사용할 프로바이더의 API 키를 설정하세요.
+
 ```bash
-# OpenCode API Key (필수 - Task 실행 시 필요)
-export OPEN_CODE_API_KEY="your-api-key-here"
+# OpenCode API Key (기본값 - 19개 모델 지원)
+export OPEN_CODE_API_KEY="your-opencode-key"
+
+# 또는 다른 프로바이더 API 키
+export ANTHROPIC_API_KEY="sk-ant-xxx"  # Claude 직접 사용 시 (추후 지원)
+export OPENAI_API_KEY="sk-proj-xxx"    # OpenAI 직접 사용 시
+export XAI_API_KEY="your-xai-key"      # xAI 직접 사용 시
+export GEMINI_API_KEY="your-key"       # Gemini 직접 사용 시 (추후 지원)
 
 # 데이터베이스 (선택 - 미설정 시 SQLite 사용)
 export DATABASE_URL="postgres://cnap:cnap@localhost:5432/cnap?sslmode=disable"
 ```
+
+**참고**: CLI에서 Agent 생성 시 API 키가 없으면 입력 프롬프트가 표시됩니다.
 
 ### 3. 상태 확인
 
@@ -38,6 +50,72 @@ export DATABASE_URL="postgres://cnap:cnap@localhost:5432/cnap?sslmode=disable"
 ./bin/cnap health
 # 출력: OK
 ```
+
+---
+
+## 지원 AI 모델
+
+CNAP은 5개의 AI 프로바이더와 다양한 모델을 지원합니다.
+
+### OpenCode (추천 🌟)
+
+**특징**: 단일 API로 19개 모델 사용 가능
+
+| 카테고리 | 모델 ID | 설명 |
+|---------|---------|------|
+| **Claude** | `claude-opus-4-5` | 최고 성능 |
+|  | `claude-sonnet-4-5` | 균형잡힌 성능/비용 |
+|  | `claude-haiku-4-5` | 빠른 응답 |
+| **GPT** | `gpt-5.1` | 최신 GPT |
+|  | `gpt-5.1-codex` | 코드 특화 |
+|  | `gpt-5-nano` | 경량 모델 |
+| **Gemini** | `gemini-3-pro` | Google AI |
+| **xAI** | `grok-code` | 코드 작업 최적화 |
+| **중국 AI** | `qwen3-coder` | Alibaba |
+|  | `glm-4.6` | Zhipu AI |
+|  | `kimi-k2` | Moonshot AI |
+
+**사용 예시**:
+```bash
+export OPEN_CODE_API_KEY="your-key"
+# provider를 opencode로 설정하고 원하는 모델 선택
+```
+
+### OpenAI
+
+**특징**: OpenAI 공식 API 직접 사용
+
+| 모델 ID | 설명 |
+|---------|------|
+| `gpt-5.1` | 최신 GPT 모델 |
+| `gpt-5` | GPT-5 |
+| `gpt-5.1-codex` | 코드 특화 |
+
+**사용 예시**:
+```bash
+export OPENAI_API_KEY="sk-proj-xxx"
+# provider를 openai로 설정
+```
+
+### xAI
+
+**특징**: xAI의 Grok 모델
+
+| 모델 ID | 설명 |
+|---------|------|
+| `grok-code` | 코드 작업 최적화 |
+
+**사용 예시**:
+```bash
+export XAI_API_KEY="your-key"
+# provider를 xai로 설정
+```
+
+### Claude & Gemini (추후 지원)
+
+**현재 상태**: OpenCode provider를 통해 사용 가능
+
+직접 API는 추후 구현 예정입니다. 현재는 `opencode` provider로 Claude/Gemini 모델을 실행할 수 있습니다.
 
 ---
 
@@ -55,18 +133,32 @@ export DATABASE_URL="postgres://cnap:cnap@localhost:5432/cnap?sslmode=disable"
 ```
 Agent 이름: my-assistant
 설명: 개인 비서 AI
-모델 (예: gpt-4): gpt-4
+프로바이더 (opencode/gemini/claude/openai/xai) [opencode]: opencode
+모델 (예: claude-sonnet-4-5): claude-sonnet-4-5
+✓ OPEN_CODE_API_KEY가 환경 변수에서 발견되었습니다.
 프롬프트 (역할 정의): 당신은 친절하고 도움이 되는 AI 비서입니다.
 ```
 
 **출력:**
 ```
-✓ Agent 'my-assistant' 생성 완료
+✓ Agent 'my-assistant' 생성 완료 (Provider: opencode, Model: claude-sonnet-4-5)
 ```
 
 **팁**: 비대화형으로 생성하려면:
 ```bash
-echo -e "my-assistant\n개인 비서 AI\ngpt-4\n당신은 친절하고 도움이 되는 AI 비서입니다." | ./bin/cnap agent create
+echo -e "my-assistant\n개인 비서 AI\nopencode\nclaude-sonnet-4-5\n당신은 친절하고 도움이 되는 AI 비서입니다." | ./bin/cnap agent create
+```
+
+**API 키가 없는 경우:**
+```
+Agent 이름: my-bot
+설명: AI 비서
+프로바이더 (opencode/gemini/claude/openai/xai) [opencode]: openai
+모델 (예: gpt-5.1): gpt-5.1
+⚠ OPENAI_API_KEY가 설정되지 않았습니다.
+API Key를 입력하세요 (Enter를 누르면 건너뛰기): sk-proj-xxxxx
+✓ OPENAI_API_KEY가 설정되었습니다.
+프롬프트 (역할 정의): 친절한 AI입니다.
 ```
 
 ### Step 2: Agent 확인
@@ -77,14 +169,30 @@ echo -e "my-assistant\n개인 비서 AI\ngpt-4\n당신은 친절하고 도움이
 
 **출력:**
 ```
-NAME           STATUS  MODEL  DESCRIPTION   CREATED
-----           ------  -----  -----------   -------
-my-assistant   active  gpt-4  개인 비서 AI   2025-11-30 23:15
+NAME           STATUS  MODEL                DESCRIPTION   CREATED
+----           ------  -----                -----------   -------
+my-assistant   active  claude-sonnet-4-5   개인 비서 AI   2025-11-30 23:15
 ```
 
 **상세 정보 확인:**
 ```bash
 ./bin/cnap agent view my-assistant
+```
+
+**출력:**
+```
+=== Agent 정보: my-assistant ===
+
+이름:        my-assistant
+상태:        active
+프로바이더:  opencode
+모델:        claude-sonnet-4-5
+설명:        개인 비서 AI
+프롬프트:
+당신은 친절하고 도움이 되는 AI 비서입니다.
+
+생성일:      2025-11-30 23:15:30
+수정일:      2025-11-30 23:15:30
 ```
 
 ### Step 3: Task 생성 (프롬프트 포함)
@@ -135,7 +243,7 @@ Agent ID:    my-assistant
 **내부 동작:**
 1. Task 상태를 `running`으로 변경
 2. Runner가 없으면 자동 재생성 (🎯 핵심 기능!)
-3. OpenCode API 호출
+3. Provider별 API 호출 (opencode, openai, xai 등)
 4. 백그라운드에서 실행
 
 ### Step 6: 실행 상태 확인
@@ -153,6 +261,104 @@ Agent ID:    my-assistant
 상태:        running  # pending → running으로 변경됨
 프롬프트:    2+2는 얼마인가요?
 ...
+```
+
+---
+
+## 멀티 프로바이더 사용법
+
+여러 AI 프로바이더를 선택하여 사용하는 방법입니다.
+
+### OpenCode로 Claude 사용 (추천 🌟)
+
+가장 간편한 방법입니다. 단일 API 키로 19개 모델을 모두 사용할 수 있습니다.
+
+```bash
+# 1. API 키 설정
+export OPEN_CODE_API_KEY="your-key"
+
+# 2. Agent 생성 (비대화형)
+echo -e "claude-bot\nClaude AI\nopencode\nclaude-sonnet-4-5\n친절한 AI입니다" | ./bin/cnap agent create
+
+# 3. Task 실행
+./bin/cnap task create claude-bot task-001 --prompt "안녕하세요"
+./bin/cnap task send task-001
+```
+
+### OpenAI 직접 API 사용
+
+OpenAI 공식 API를 직접 호출합니다.
+
+```bash
+# 1. API 키 설정
+export OPENAI_API_KEY="sk-proj-xxxxx"
+
+# 2. Agent 생성
+echo -e "gpt-bot\nGPT AI\nopenai\ngpt-5.1\n친절한 AI입니다" | ./bin/cnap agent create
+
+# 3. Task 실행
+./bin/cnap task create gpt-bot task-002 --prompt "Hello"
+./bin/cnap task send task-002
+```
+
+### xAI Grok 사용
+
+xAI의 Grok 코드 특화 모델을 사용합니다.
+
+```bash
+# 1. API 키 설정
+export XAI_API_KEY="your-xai-key"
+
+# 2. Agent 생성
+echo -e "grok-bot\nGrok Code AI\nxai\ngrok-code\nYou are a coding assistant" | ./bin/cnap agent create
+
+# 3. Task 실행
+./bin/cnap task create grok-bot task-003 --prompt "Write a Python function"
+./bin/cnap task send task-003
+```
+
+### 여러 프로바이더 동시 사용
+
+하나의 시스템에서 여러 프로바이더를 동시에 사용할 수 있습니다.
+
+```bash
+# 모든 API 키 설정
+export OPEN_CODE_API_KEY="your-opencode-key"
+export OPENAI_API_KEY="sk-proj-xxx"
+export XAI_API_KEY="your-xai-key"
+
+# 각기 다른 프로바이더로 Agent 생성
+echo -e "claude-bot\nClaude\nopencode\nclaude-sonnet-4-5\nClaude AI" | ./bin/cnap agent create
+echo -e "gpt-bot\nGPT\nopenai\ngpt-5.1\nOpenAI" | ./bin/cnap agent create
+echo -e "grok-bot\nGrok\nxai\ngrok-code\nGrok AI" | ./bin/cnap agent create
+
+# Agent 목록 확인
+./bin/cnap agent list
+```
+
+**출력:**
+```
+NAME          STATUS  MODEL                DESCRIPTION  CREATED
+----          ------  -----                -----------  -------
+claude-bot    active  claude-sonnet-4-5   Claude       2025-12-01 00:10
+gpt-bot       active  gpt-5.1              OpenAI       2025-12-01 00:11
+grok-bot      active  grok-code            Grok AI      2025-12-01 00:12
+```
+
+### Agent 수정 (프로바이더 변경)
+
+기존 Agent의 프로바이더를 변경할 수 있습니다.
+
+```bash
+./bin/cnap agent edit my-assistant
+```
+
+**대화형 입력:**
+```
+설명 (현재: 개인 비서 AI): [Enter로 스킵]
+프로바이더 (현재: opencode) [opencode/gemini/claude/openai/xai]: openai
+모델 (현재: claude-sonnet-4-5): gpt-5.1
+프롬프트 (현재: 당신은...): [Enter로 스킵]
 ```
 
 ---
@@ -282,14 +488,43 @@ chat-001  pending    2025-11-30 23:17  2025-11-30 23:17
 
 ## 문제 해결
 
-### "OPEN_CODE_API_KEY not set" 에러
+### API 키 관련 에러
 
-**원인**: Task 실행 시 API 키가 없음
+#### "OPEN_CODE_API_KEY not set"
+
+**원인**: OpenCode provider 사용 시 API 키가 없음
 
 **해결:**
 ```bash
 export OPEN_CODE_API_KEY="your-key"
 ```
+
+#### "환경 변수 ANTHROPIC_API_KEY가 설정되어 있지 않습니다"
+
+**원인**: Claude provider를 직접 사용하려 했지만 API 키가 없음
+
+**해결 1**: OpenCode로 전환 (추천)
+```bash
+# OpenCode provider로 Claude 모델 사용
+export OPEN_CODE_API_KEY="your-key"
+# Agent 생성 시 provider를 opencode로 선택
+```
+
+**해결 2**: Claude API 키 설정 (추후 지원)
+```bash
+export ANTHROPIC_API_KEY="sk-ant-xxx"
+# 현재는 claude provider 직접 API가 구현되지 않아 에러 발생
+# opencode provider를 사용하세요
+```
+
+#### 다른 Provider API 키 에러
+
+| Provider | 환경 변수 | 상태 |
+|----------|----------|------|
+| openai   | `OPENAI_API_KEY` | ✅ 지원 |
+| xai      | `XAI_API_KEY` | ✅ 지원 |
+| gemini   | `GEMINI_API_KEY` | ⏳ 추후 지원 |
+| claude   | `ANTHROPIC_API_KEY` | ⏳ 추후 지원 |
 
 ### "database is locked" (SQLite)
 
@@ -327,6 +562,34 @@ export DATABASE_URL="postgres://cnap:cnap@localhost:5432/cnap?sslmode=disable"
 ---
 
 ## 주요 특징
+
+### 🌐 멀티 프로바이더 지원 (PR #61)
+
+**특징**: 5개 AI 프로바이더 선택 가능
+
+**지원 프로바이더:**
+- **OpenCode** (추천): 19개 모델 통합 API
+- **OpenAI**: GPT 공식 API
+- **xAI**: Grok 코드 특화
+- **Claude/Gemini**: 추후 직접 API 지원 (현재 OpenCode로 사용 가능)
+
+**장점:**
+- Provider별 최적 모델 선택
+- 비용/성능 트레이드오프 조정
+- API 키 자동 관리
+- 여러 Provider 동시 사용 가능
+
+**예시:**
+```bash
+# OpenCode로 Claude 사용 (추천)
+echo -e "bot1\nAI\nopencode\nclaude-sonnet-4-5\nAI" | ./bin/cnap agent create
+
+# OpenAI 직접 사용
+echo -e "bot2\nAI\nopenai\ngpt-5.1\nAI" | ./bin/cnap agent create
+
+# xAI Grok 사용
+echo -e "bot3\nAI\nxai\ngrok-code\nAI" | ./bin/cnap agent create
+```
 
 ### 🎯 Runner 자동 재생성 (PR #59)
 
@@ -392,6 +655,8 @@ export DATABASE_URL="postgres://cnap:cnap@localhost:5432/cnap?sslmode=disable"
 
 ## 완전한 예제 스크립트
 
+### 기본 예제 (OpenCode)
+
 ```bash
 #!/bin/bash
 set -e
@@ -399,8 +664,8 @@ set -e
 # 환경 설정
 export OPEN_CODE_API_KEY="your-key"
 
-# 1. Agent 생성
-echo -e "math-tutor\n수학 선생님\ngpt-4\n수학 문제를 풀어주는 선생님입니다." | ./bin/cnap agent create
+# 1. Agent 생성 (Claude 모델)
+echo -e "math-tutor\n수학 선생님\nopencode\nclaude-sonnet-4-5\n수학 문제를 풀어주는 선생님입니다." | ./bin/cnap agent create
 
 # 2. Task 생성 및 실행
 ./bin/cnap task create math-tutor homework-001 --prompt "2의 10승은?"
@@ -429,6 +694,55 @@ sleep 5
 echo "✓ 전체 파이프라인 완료"
 ```
 
+### 멀티 프로바이더 예제
+
+```bash
+#!/bin/bash
+set -e
+
+# 여러 Provider API 키 설정
+export OPEN_CODE_API_KEY="your-opencode-key"
+export OPENAI_API_KEY="sk-proj-xxx"
+export XAI_API_KEY="your-xai-key"
+
+# 1. 각기 다른 프로바이더로 Agent 생성
+echo "=== Creating agents with different providers ==="
+
+# OpenCode로 Claude 사용
+echo -e "claude-bot\nClaude AI\nopencode\nclaude-sonnet-4-5\n친절한 Claude AI" | ./bin/cnap agent create
+
+# OpenAI 직접 사용
+echo -e "gpt-bot\nGPT AI\nopenai\ngpt-5.1\n친절한 GPT AI" | ./bin/cnap agent create
+
+# xAI Grok 사용
+echo -e "grok-bot\nGrok AI\nxai\ngrok-code\nCode-focused AI" | ./bin/cnap agent create
+
+# 2. Agent 목록 확인
+echo "=== Agent list ==="
+./bin/cnap agent list
+
+# 3. 각 Agent로 Task 실행
+echo "=== Running tasks ==="
+
+./bin/cnap task create claude-bot task-c1 --prompt "안녕하세요"
+./bin/cnap task send task-c1
+
+./bin/cnap task create gpt-bot task-g1 --prompt "Hello"
+./bin/cnap task send task-g1
+
+./bin/cnap task create grok-bot task-x1 --prompt "Write a Python function"
+./bin/cnap task send task-x1
+
+# 4. 결과 확인
+sleep 3
+echo "=== Task status ==="
+./bin/cnap task view task-c1
+./bin/cnap task view task-g1
+./bin/cnap task view task-x1
+
+echo "✓ 멀티 프로바이더 테스트 완료"
+```
+
 ---
 
 ## 다음 단계
@@ -443,6 +757,7 @@ echo "✓ 전체 파이프라인 완료"
 ## 참고 자료
 
 ### 관련 PR
+- [PR #61](https://github.com/cnap-oss/app/pull/61) - 멀티 AI 프로바이더 지원 (최신)
 - [PR #59](https://github.com/cnap-oss/app/pull/59) - Runner 자동 재생성 구현
 - [PR #56](https://github.com/cnap-oss/app/pull/56) - Controller-RunnerManager 통합 테스트
 - [PR #57](https://github.com/cnap-oss/app/pull/57) - CLI 통합 테스트 스크립트
