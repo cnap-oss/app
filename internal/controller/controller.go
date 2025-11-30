@@ -689,22 +689,33 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 		}
 	}()
 
-	// RunnerManager에서 TaskRunner 조회
-	runner := c.runnerManager.GetRunner(taskID)
-	if runner == nil {
-		c.logger.Error("TaskRunner not found",
-			zap.String("task_id", taskID),
-		)
-		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
-		return
-	}
-
-	// Agent 정보 조회
+	// Agent 정보 조회 (Runner 생성에 필요)
 	agent, err := c.repo.GetAgent(ctx, task.AgentID)
 	if err != nil {
 		c.logger.Error("Failed to get agent info", zap.Error(err))
 		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
 		return
+	}
+
+	// RunnerManager에서 TaskRunner 조회
+	runner := c.runnerManager.GetRunner(taskID)
+	if runner == nil {
+		// Runner가 없으면 자동으로 재생성 (CLI 단일 실행 프로세스 지원)
+		c.logger.Info("Runner not found, recreating...",
+			zap.String("task_id", taskID),
+			zap.String("agent_id", task.AgentID),
+		)
+
+		agentInfo := taskrunner.AgentInfo{
+			AgentID: agent.AgentID,
+			Model:   agent.Model,
+			Prompt:  agent.Prompt,
+		}
+		runner = c.runnerManager.CreateRunner(taskID, agentInfo, c.logger)
+
+		c.logger.Info("Runner recreated successfully",
+			zap.String("task_id", taskID),
+		)
 	}
 
 	// 메시지 목록 조회 및 변환

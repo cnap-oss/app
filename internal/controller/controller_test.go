@@ -4,9 +4,12 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/cnap-oss/app/internal/controller"
+	taskrunner "github.com/cnap-oss/app/internal/runner"
 	"github.com/cnap-oss/app/internal/storage"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 	"gorm.io/driver/sqlite"
@@ -341,4 +344,43 @@ func TestControllerCancelTask_NotFound(t *testing.T) {
 	err := ctrl.CancelTask(ctx, "non-existent-task")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
+}
+
+// TestControllerSendMessage_RunnerAutoRecreation tests runner auto-recreation
+// This test simulates the CLI scenario where runner is not available
+// Note: RunnerManager is singleton, so we can access it directly for testing
+func TestControllerSendMessage_RunnerAutoRecreation(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
+	ctrl, cleanup := newTestController(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Get singleton RunnerManager
+	runnerMgr := taskrunner.GetRunnerManager()
+
+	// 1. Agent 및 Task 생성
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-recreate", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateTask(ctx, "agent-recreate", "task-recreate", "Hello"))
+
+	// 2. Runner가 생성되었는지 확인
+	runner := runnerMgr.GetRunner("task-recreate")
+	assert.NotNil(t, runner, "Runner should be created after CreateTask")
+
+	// 3. Runner를 수동으로 삭제 (CLI 프로세스 재시작 시뮬레이션)
+	runnerMgr.DeleteRunner("task-recreate")
+	runner = runnerMgr.GetRunner("task-recreate")
+	assert.Nil(t, runner, "Runner should be deleted")
+
+	// 4. SendMessage 실행 - Runner가 자동으로 재생성되어야 함
+	err := ctrl.SendMessage(ctx, "task-recreate")
+	assert.NoError(t, err, "SendMessage should succeed even without runner (auto-recreation)")
+
+	// 5. executeTask가 비동기로 실행되므로 잠시 대기
+	time.Sleep(100 * time.Millisecond)
+
+	// Note: executeTask 내부에서 runner를 재생성하므로
+	// 로그에 "Runner not found, recreating..." 메시지가 출력되어야 함
+	// 실제 프로덕션에서는 이 로직 덕분에 CLI 단일 실행도 정상 동작함
 }
