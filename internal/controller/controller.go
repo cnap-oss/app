@@ -581,6 +581,49 @@ func (c *Controller) SendMessage(ctx context.Context, taskID string) error {
 	return nil
 }
 
+// ExecuteTask는 생성된 Task를 실행합니다.
+func (c *Controller) ExecuteTask(ctx context.Context, taskID string) error {
+	c.logger.Info("Executing task", zap.String("task_id", taskID))
+
+	if c.repo == nil {
+		return fmt.Errorf("controller: repository is not configured")
+	}
+
+	// Task 조회
+	task, err := c.repo.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("task not found: %s", taskID)
+		}
+		return err
+	}
+
+	// 상태 확인 (이미 실행 중이거나 완료된 경우 방지)
+	if task.Status != storage.TaskStatusPending {
+		return fmt.Errorf("task is not in pending state (current: %s)", task.Status)
+	}
+
+	// Runner 확인
+	runner := c.runnerManager.GetRunner(taskID)
+	if runner == nil {
+		return fmt.Errorf("runner not found for task: %s", taskID)
+	}
+
+	// context with timeout
+	taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	c.mu.Lock()
+	c.taskContexts[taskID] = &TaskContext{ctx: taskCtx, cancel: cancel}
+	c.mu.Unlock()
+
+	// 비동기 실행
+	go c.executeTask(taskCtx, taskID, task)
+
+	c.logger.Info("Task execution started",
+		zap.String("task_id", taskID),
+	)
+	return nil
+}
+
 // CancelTask는 실행 중인 Task를 취소합니다.
 func (c *Controller) CancelTask(ctx context.Context, taskID string) error {
 	c.logger.Info("Canceling task",

@@ -69,10 +69,21 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 	taskCancelCmd := &cobra.Command{
 		Use:   "cancel <task-id>",
 		Short: "Task 취소",
-		Long:  "Task를 취소 상태로 변경합니다.",
+		Long:  "실행 중인 Task를 취소합니다.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTaskUpdateStatus(logger, args[0], storage.TaskStatusCanceled)
+			return runTaskCancel(logger, args[0])
+		},
+	}
+
+	// task run
+	taskRunCmd := &cobra.Command{
+		Use:   "run <task-id>",
+		Short: "Task 실행",
+		Long:  "생성된 Pending 상태의 Task를 실행합니다.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskRun(logger, args[0])
 		},
 	}
 
@@ -114,6 +125,7 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 	taskCmd.AddCommand(taskViewCmd)
 	taskCmd.AddCommand(taskUpdateStatusCmd)
 	taskCmd.AddCommand(taskCancelCmd)
+	taskCmd.AddCommand(taskRunCmd)
 	taskCmd.AddCommand(taskSendCmd)
 	taskCmd.AddCommand(taskAddMessageCmd)
 	taskCmd.AddCommand(taskMessagesCmd)
@@ -253,6 +265,43 @@ func runTaskUpdateStatus(logger *zap.Logger, taskID, status string) error {
 	}
 
 	fmt.Printf("✓ Task '%s' 상태 변경: %s\n", taskID, status)
+	return nil
+}
+
+func runTaskCancel(logger *zap.Logger, taskID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	ctrl, cleanup, err := newController(logger)
+	if err != nil {
+		return fmt.Errorf("컨트롤러 초기화 실패: %w", err)
+	}
+	defer cleanup()
+
+	if err := ctrl.CancelTask(ctx, taskID); err != nil {
+		return fmt.Errorf("task 취소 실패: %w", err)
+	}
+
+	fmt.Printf("✓ Task '%s' 취소 완료\n", taskID)
+	return nil
+}
+
+func runTaskRun(logger *zap.Logger, taskID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ctrl, cleanup, err := newController(logger)
+	if err != nil {
+		return fmt.Errorf("컨트롤러 초기화 실패: %w", err)
+	}
+	defer cleanup()
+
+	if err := ctrl.ExecuteTask(ctx, taskID); err != nil {
+		return fmt.Errorf("task 실행 실패: %w", err)
+	}
+
+	fmt.Printf("✓ Task '%s' 실행 시작\n", taskID)
+	fmt.Printf("  상태 확인: cnap task view %s\n", taskID)
 	return nil
 }
 
