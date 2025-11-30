@@ -2,6 +2,8 @@ package taskrunner
 
 import (
 	"sync"
+
+	"go.uber.org/zap"
 )
 
 // RunnerManager manages Runner instances.
@@ -26,15 +28,18 @@ func GetRunnerManager() *RunnerManager {
 }
 
 // CreateRunner creates a new Runner and adds it to the manager.
-func (rm *RunnerManager) CreateRunner(taskId string, agent AgentInfo) *Runner {
+func (rm *RunnerManager) CreateRunner(taskId string, _ AgentInfo, logger *zap.Logger, opts ...RunnerOption) *Runner {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	runner := &Runner{
-		ID:     taskId,
-		Status: "Pending", // Initial status
-		// Initialize other fields if needed
+	if logger == nil {
+		logger = zap.NewNop()
 	}
+
+	runner := NewRunner(logger, opts...)
+	runner.ID = taskId
+	runner.Status = "Pending" // Initial status
+
 	rm.runners[taskId] = runner
 	return runner
 }

@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 // mockAgentInfo is a mock AgentInfo for testing.
 func mockAgentInfo() AgentInfo {
 	return AgentInfo{
 		AgentID: "test-agent",
-		Model:   "gpt-4",
+		Model:   "grok-code",
 		Prompt:  "test prompt",
 	}
 }
@@ -23,6 +24,8 @@ func TestRunnerManager_Singleton(t *testing.T) {
 }
 
 func TestRunnerManager_CRUD(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
 	rm := GetRunnerManager()
 
 	// Ensure clean state for test (though singleton persists, so we might need to clear it if tests run in same process)
@@ -35,7 +38,7 @@ func TestRunnerManager_CRUD(t *testing.T) {
 	taskId := "task-1"
 
 	// Create
-	runner := rm.CreateRunner(taskId, agent)
+	runner := rm.CreateRunner(taskId, agent, zap.NewNop())
 	assert.NotNil(t, runner)
 	assert.Equal(t, taskId, runner.ID)
 	assert.Equal(t, "Pending", runner.Status)
