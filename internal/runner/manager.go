@@ -28,7 +28,7 @@ func GetRunnerManager() *RunnerManager {
 }
 
 // CreateRunner creates a new Runner and adds it to the manager.
-func (rm *RunnerManager) CreateRunner(taskId string, _ AgentInfo, logger *zap.Logger, opts ...RunnerOption) *Runner {
+func (rm *RunnerManager) CreateRunner(taskId string, agentInfo AgentInfo, logger *zap.Logger, opts ...RunnerOption) *Runner {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
@@ -39,6 +39,7 @@ func (rm *RunnerManager) CreateRunner(taskId string, _ AgentInfo, logger *zap.Lo
 	runner := NewRunner(logger, opts...)
 	runner.ID = taskId
 	runner.Status = "Pending" // Initial status
+	runner.agentInfo = agentInfo // Store AgentInfo including provider
 
 	rm.runners[taskId] = runner
 	return runner

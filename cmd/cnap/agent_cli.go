@@ -125,9 +125,37 @@ func runAgentCreate(logger *zap.Logger) error {
 	description, _ := reader.ReadString('\n')
 	description = normalizeInput(strings.TrimSpace(description))
 
-	fmt.Print("모델 (예: gpt-4): ")
+	// Provider 선택
+	fmt.Print("프로바이더 (opencode/gemini/claude/openai/xai) [opencode]: ")
+	provider, _ := reader.ReadString('\n')
+	provider = strings.TrimSpace(strings.ToLower(provider))
+	if provider == "" {
+		provider = "opencode"
+	}
+
+	// Provider별 추천 모델 표시
+	var modelHint string
+	switch provider {
+	case "gemini":
+		modelHint = "gemini-3-pro"
+	case "claude":
+		modelHint = "claude-sonnet-4-5"
+	case "openai":
+		modelHint = "gpt-5.1"
+	case "xai":
+		modelHint = "grok-code"
+	default:
+		modelHint = "claude-sonnet-4-5"
+	}
+
+	fmt.Printf("모델 (예: %s): ", modelHint)
 	model, _ := reader.ReadString('\n')
 	model = normalizeInput(strings.TrimSpace(model))
+
+	// API Key 확인 및 설정
+	if err := ensureAPIKey(provider); err != nil {
+		return fmt.Errorf("API 키 설정 실패: %w", err)
+	}
 
 	fmt.Print("프롬프트 (역할 정의): ")
 	prompt, _ := reader.ReadString('\n')
@@ -139,11 +167,56 @@ func runAgentCreate(logger *zap.Logger) error {
 	}
 
 	// Agent 생성
-	if err := ctrl.CreateAgent(ctx, name, description, model, prompt); err != nil {
+	if err := ctrl.CreateAgent(ctx, name, description, provider, model, prompt); err != nil {
 		return fmt.Errorf("agent 생성 실패: %w", err)
 	}
 
-	fmt.Printf("✓ Agent '%s' 생성 완료\n", name)
+	fmt.Printf("✓ Agent '%s' 생성 완료 (Provider: %s, Model: %s)\n", name, provider, model)
+	return nil
+}
+
+// ensureAPIKey는 provider에 필요한 API 키가 설정되어 있는지 확인하고, 없으면 입력받습니다.
+func ensureAPIKey(provider string) error {
+	var envKey string
+	switch provider {
+	case "opencode":
+		envKey = "OPEN_CODE_API_KEY"
+	case "gemini":
+		envKey = "GEMINI_API_KEY"
+	case "claude":
+		envKey = "ANTHROPIC_API_KEY"
+	case "openai":
+		envKey = "OPENAI_API_KEY"
+	case "xai":
+		envKey = "XAI_API_KEY"
+	default:
+		return fmt.Errorf("지원하지 않는 프로바이더: %s", provider)
+	}
+
+	// 환경 변수에 이미 설정되어 있는지 확인
+	if os.Getenv(envKey) != "" {
+		fmt.Printf("✓ %s가 환경 변수에서 발견되었습니다.\n", envKey)
+		return nil
+	}
+
+	// 환경 변수에 없으면 입력받기
+	fmt.Printf("⚠ %s가 설정되지 않았습니다.\n", envKey)
+	fmt.Printf("API Key를 입력하세요 (Enter를 누르면 건너뛰기): ")
+
+	reader := bufio.NewReader(os.Stdin)
+	apiKey, _ := reader.ReadString('\n')
+	apiKey = strings.TrimSpace(apiKey)
+
+	if apiKey != "" {
+		// 입력받은 API 키를 환경 변수로 설정
+		if err := os.Setenv(envKey, apiKey); err != nil {
+			return fmt.Errorf("환경 변수 설정 실패: %w", err)
+		}
+		fmt.Printf("✓ %s가 설정되었습니다.\n", envKey)
+	} else {
+		fmt.Printf("⚠ API Key가 설정되지 않았습니다. Task 실행 시 필요합니다.\n")
+	}
+
 	return nil
 }
 
@@ -209,6 +282,7 @@ func runAgentView(logger *zap.Logger, agentName string) error {
 	fmt.Printf("=== Agent 정보: %s ===\n\n", agent.Name)
 	fmt.Printf("이름:        %s\n", agent.Name)
 	fmt.Printf("상태:        %s\n", agent.Status)
+	fmt.Printf("프로바이더:  %s\n", agent.Provider)
 	fmt.Printf("모델:        %s\n", agent.Model)
 	fmt.Printf("설명:        %s\n", agent.Description)
 	fmt.Printf("프롬프트:\n%s\n\n", agent.Prompt)
@@ -273,6 +347,13 @@ func runAgentEdit(logger *zap.Logger, agentName string) error {
 		description = agent.Description
 	}
 
+	fmt.Printf("프로바이더 (현재: %s) [opencode/gemini/claude/openai/xai]: ", agent.Provider)
+	provider, _ := reader.ReadString('\n')
+	provider = strings.TrimSpace(strings.ToLower(provider))
+	if provider == "" {
+		provider = agent.Provider
+	}
+
 	fmt.Printf("모델 (현재: %s): ", agent.Model)
 	model, _ := reader.ReadString('\n')
 	model = normalizeInput(strings.TrimSpace(model))
@@ -288,7 +369,7 @@ func runAgentEdit(logger *zap.Logger, agentName string) error {
 	}
 
 	// Agent 수정
-	if err := ctrl.UpdateAgent(ctx, agentName, description, model, prompt); err != nil {
+	if err := ctrl.UpdateAgent(ctx, agentName, description, provider, model, prompt); err != nil {
 		return fmt.Errorf("agent 수정 실패: %w", err)
 	}
 

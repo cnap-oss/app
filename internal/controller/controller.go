@@ -75,9 +75,10 @@ func (c *Controller) Stop(ctx context.Context) error {
 }
 
 // CreateAgent는 새로운 에이전트를 생성합니다.
-func (c *Controller) CreateAgent(ctx context.Context, agentID, description, model, prompt string) error {
+func (c *Controller) CreateAgent(ctx context.Context, agentID, description, provider, model, prompt string) error {
 	c.logger.Info("Creating agent",
 		zap.String("agent_id", agentID),
+		zap.String("provider", provider),
 		zap.String("model", model),
 	)
 
@@ -88,6 +89,7 @@ func (c *Controller) CreateAgent(ctx context.Context, agentID, description, mode
 	payload := &storage.Agent{
 		AgentID:     agentID,
 		Description: description,
+		Provider:    provider,
 		Model:       model,
 		Prompt:      prompt,
 		Status:      storage.AgentStatusActive,
@@ -153,6 +155,7 @@ func (c *Controller) ListAgents(ctx context.Context) ([]string, error) {
 type AgentInfo struct {
 	Name        string
 	Description string
+	Provider    string
 	Model       string
 	Prompt      string
 	Status      string
@@ -181,6 +184,7 @@ func (c *Controller) GetAgentInfo(ctx context.Context, agent string) (*AgentInfo
 	info := &AgentInfo{
 		Name:        rec.AgentID,
 		Description: rec.Description,
+		Provider:    rec.Provider,
 		Model:       rec.Model,
 		Prompt:      rec.Prompt,
 		Status:      rec.Status,
@@ -250,9 +254,10 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, prompt str
 
 	// RunnerManager에 TaskRunner 생성 (logger 주입)
 	agentInfo := taskrunner.AgentInfo{
-		AgentID: agentID,
-		Model:   agent.Model,
-		Prompt:  agent.Prompt,
+		AgentID:  agentID,
+		Provider: agent.Provider,
+		Model:    agent.Model,
+		Prompt:   agent.Prompt,
 	}
 	runner := c.runnerManager.CreateRunner(taskID, agentInfo, c.logger)
 	if runner == nil {
@@ -406,7 +411,7 @@ func (c *Controller) ValidateTask(taskID string) error {
 }
 
 // UpdateAgent는 에이전트 정보를 수정합니다.
-func (c *Controller) UpdateAgent(ctx context.Context, agentID, description, model, prompt string) error {
+func (c *Controller) UpdateAgent(ctx context.Context, agentID, description, provider, model, prompt string) error {
 	c.logger.Info("Updating agent",
 		zap.String("agent_id", agentID),
 	)
@@ -426,6 +431,7 @@ func (c *Controller) UpdateAgent(ctx context.Context, agentID, description, mode
 	agent := &storage.Agent{
 		AgentID:     agentID,
 		Description: description,
+		Provider:    provider,
 		Model:       model,
 		Prompt:      prompt,
 	}
@@ -707,9 +713,10 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 		)
 
 		agentInfo := taskrunner.AgentInfo{
-			AgentID: agent.AgentID,
-			Model:   agent.Model,
-			Prompt:  agent.Prompt,
+			AgentID:  agent.AgentID,
+			Provider: agent.Provider,
+			Model:    agent.Model,
+			Prompt:   agent.Prompt,
 		}
 		runner = c.runnerManager.CreateRunner(taskID, agentInfo, c.logger)
 
