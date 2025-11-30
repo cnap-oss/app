@@ -64,6 +64,8 @@ func TestControllerListAgents(t *testing.T) {
 }
 
 func TestControllerCreateTaskWithPrompt(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
 	ctrl, cleanup := newTestController(t)
 	defer cleanup()
 
@@ -85,6 +87,8 @@ func TestControllerCreateTaskWithPrompt(t *testing.T) {
 }
 
 func TestControllerCreateTaskWithoutPrompt(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
 	ctrl, cleanup := newTestController(t)
 	defer cleanup()
 
@@ -102,6 +106,8 @@ func TestControllerCreateTaskWithoutPrompt(t *testing.T) {
 }
 
 func TestControllerAddMessage(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
 	ctrl, cleanup := newTestController(t)
 	defer cleanup()
 
@@ -131,6 +137,8 @@ func TestControllerAddMessage(t *testing.T) {
 }
 
 func TestControllerSendMessage(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
 	ctrl, cleanup := newTestController(t)
 	defer cleanup()
 
@@ -154,6 +162,8 @@ func TestControllerSendMessage(t *testing.T) {
 }
 
 func TestControllerSendMessageWithoutPromptOrMessages(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
 	ctrl, cleanup := newTestController(t)
 	defer cleanup()
 
@@ -170,6 +180,8 @@ func TestControllerSendMessageWithoutPromptOrMessages(t *testing.T) {
 }
 
 func TestControllerMultiTurnConversation(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
 	ctrl, cleanup := newTestController(t)
 	defer cleanup()
 

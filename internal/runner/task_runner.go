@@ -40,5 +40,11 @@ func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
 		}
 	}
 
-	return r.RunWithResult(ctx, req.Model, req.TaskID, prompt)
+	// API 호출
+	result, err := r.RunWithResult(ctx, req.Model, req.TaskID, prompt)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
