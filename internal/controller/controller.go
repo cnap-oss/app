@@ -672,12 +672,24 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 		return
 	}
 
-	// ChatMessage로 변환
+	// ChatMessage로 변환 - 파일에서 실제 내용 읽기
 	chatMessages := make([]taskrunner.ChatMessage, 0, len(messages))
 	for _, msg := range messages {
+		// 파일에서 메시지 내용 읽기
+		content, err := c.readMessageFromFile(msg.FilePath)
+		if err != nil {
+			c.logger.Warn("Failed to read message file, skipping",
+				zap.String("task_id", taskID),
+				zap.String("file_path", msg.FilePath),
+				zap.Error(err),
+			)
+			// 파일 읽기 실패 시 건너뛰기
+			continue
+		}
+
 		chatMessages = append(chatMessages, taskrunner.ChatMessage{
 			Role:    msg.Role,
-			Content: msg.FilePath, // TODO: 파일에서 실제 content 읽기
+			Content: content,
 		})
 	}
 
@@ -858,6 +870,29 @@ func (c *Controller) OnError(taskID string, err error) error {
 
 	// 상태를 failed로 변경
 	return c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusFailed)
+}
+
+// readMessageFromFile reads message content from a JSON file.
+func (c *Controller) readMessageFromFile(filePath string) (string, error) {
+	// 파일 읽기
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	// JSON 파싱
+	var msg map[string]interface{}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return "", fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	// content 필드 추출
+	content, ok := msg["content"].(string)
+	if !ok {
+		return "", fmt.Errorf("content field not found or not a string")
+	}
+
+	return content, nil
 }
 
 // ensure Controller implements StatusCallback
