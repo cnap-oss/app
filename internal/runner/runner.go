@@ -33,13 +33,33 @@ type StatusCallback interface {
 	OnError(taskID string, err error) error
 }
 
+const defaultBaseURL = "https://opencode.ai/zen/v1"
+
 // Runner는 short-living 에이전트 실행을 담당하는 TaskRunner 구현체입니다.
 type Runner struct {
-	ID       string
-	Status   string
-	logger   *zap.Logger
-	apiKey   string
-	callback StatusCallback
+	ID         string
+	Status     string
+	logger     *zap.Logger
+	apiKey     string
+	baseURL    string
+	httpClient *http.Client
+}
+
+// RunnerOption은 Runner 초기화 옵션을 설정하기 위한 함수 타입입니다.
+type RunnerOption func(*Runner)
+
+// WithHTTPClient는 Runner가 사용할 http.Client를 주입합니다(테스트용).
+func WithHTTPClient(client *http.Client) RunnerOption {
+	return func(r *Runner) {
+		r.httpClient = client
+	}
+}
+
+// WithBaseURL은 Runner가 요청할 기본 URL을 지정합니다(테스트용).
+func WithBaseURL(url string) RunnerOption {
+	return func(r *Runner) {
+		r.baseURL = url
+	}
 }
 
 // OpenCodeRequest는 OpenCode Zen API 요청 바디입니다.
@@ -75,16 +95,28 @@ type OpenCodeResponse struct {
 }
 
 // NewRunner는 새로운 Runner를 생성합니다.
-func NewRunner(logger *zap.Logger) *Runner {
+func NewRunner(logger *zap.Logger, opts ...RunnerOption) *Runner {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
 	apiKey := os.Getenv("OPEN_CODE_API_KEY")
 	if apiKey == "" {
 		logger.Fatal("환경 변수 OPEN_CODE_API_KEY가 설정되어 있지 않습니다")
 	}
 
-	return &Runner{
-		logger: logger,
-		apiKey: apiKey,
+	r := &Runner{
+		logger:     logger,
+		apiKey:     apiKey,
+		baseURL:    defaultBaseURL,
+		httpClient: &http.Client{Timeout: 20 * time.Second},
 	}
+
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	return r
 }
 
 // RunWithResult는 프롬프트를 OpenCode Zen API의 chat/completions 엔드포인트로 보내고 결과를 반환합니다.
@@ -114,8 +146,8 @@ func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) 
 		return nil, fmt.Errorf("요청 바디 직렬화 실패: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://opencode.ai/zen/v1/chat/completions", bytes.NewReader(body))
+	endpoint := strings.TrimRight(r.baseURL, "/") + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("요청 생성 실패: %w", err)
 	}
@@ -123,55 +155,20 @@ func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+r.apiKey)
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := r.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
+	}
 
-	// 재시도 로직 (최대 3회)
-	maxRetries := 3
-	var resp *http.Response
-	var bodyBytes []byte
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("API 요청 실패: %w", err)
+	}
+	defer resp.Body.Close()
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		resp, err = client.Do(req)
-		if err != nil {
-			r.logger.Warn("API request failed",
-				zap.Int("attempt", attempt),
-				zap.Error(err),
-			)
-			// 네트워크 에러는 재시도
-			if attempt < maxRetries {
-				time.Sleep(time.Duration(attempt) * time.Second)
-				continue
-			}
-			return nil, fmt.Errorf("API 요청 실패 (재시도 %d회): %w", maxRetries, err)
-		}
-
-		bodyBytes, err = io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("응답 읽기 실패: %w", err)
-		}
-
-		// 500번대 에러는 재시도
-		if resp.StatusCode >= 500 && attempt < maxRetries {
-			r.logger.Warn("Server error, retrying",
-				zap.Int("status_code", resp.StatusCode),
-				zap.Int("attempt", attempt),
-			)
-			time.Sleep(time.Duration(attempt) * time.Second)
-			continue
-		}
-
-		// 429 (Rate Limit)는 재시도
-		if resp.StatusCode == 429 && attempt < maxRetries {
-			r.logger.Warn("Rate limited, retrying",
-				zap.Int("attempt", attempt),
-			)
-			time.Sleep(time.Duration(attempt*2) * time.Second)
-			continue
-		}
-
-		// 성공 또는 재시도 불가능한 에러
-		break
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("응답 읽기 실패: %w", err)
 	}
 
 	contentType := resp.Header.Get("Content-Type")

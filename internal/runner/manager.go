@@ -1,7 +1,6 @@
 package taskrunner
 
 import (
-	"os"
 	"sync"
 
 	"go.uber.org/zap"
@@ -10,8 +9,6 @@ import (
 // RunnerManager manages Runner instances.
 type RunnerManager struct {
 	runners map[string]*Runner
-	logger  *zap.Logger
-	apiKey  string
 	mu      sync.RWMutex
 }
 
@@ -21,34 +18,28 @@ var (
 )
 
 // GetRunnerManager returns the singleton instance of RunnerManager.
-func GetRunnerManager(logger *zap.Logger) *RunnerManager {
+func GetRunnerManager() *RunnerManager {
 	once.Do(func() {
-		apiKey := os.Getenv("OPEN_CODE_API_KEY")
-		if apiKey == "" {
-			logger.Fatal("환경 변수 OPEN_CODE_API_KEY가 설정되어 있지 않습니다")
-		}
-
 		instance = &RunnerManager{
 			runners: make(map[string]*Runner),
-			logger:  logger,
-			apiKey:  apiKey,
 		}
 	})
 	return instance
 }
 
 // CreateRunner creates a new Runner and adds it to the manager.
-func (rm *RunnerManager) CreateRunner(taskId string, agent AgentInfo, callback StatusCallback) *Runner {
+func (rm *RunnerManager) CreateRunner(taskId string, _ AgentInfo, logger *zap.Logger, opts ...RunnerOption) *Runner {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	runner := &Runner{
-		ID:       taskId,
-		Status:   "Pending",
-		logger:   rm.logger,
-		apiKey:   rm.apiKey,
-		callback: callback,
+	if logger == nil {
+		logger = zap.NewNop()
 	}
+
+	runner := NewRunner(logger, opts...)
+	runner.ID = taskId
+	runner.Status = "Pending" // Initial status
+
 	rm.runners[taskId] = runner
 	return runner
 }

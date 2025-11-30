@@ -36,7 +36,7 @@ func NewController(logger *zap.Logger, repo *storage.Repository) *Controller {
 	return &Controller{
 		logger:        logger,
 		repo:          repo,
-		runnerManager: taskrunner.GetRunnerManager(logger),
+		runnerManager: taskrunner.GetRunnerManager(),
 		taskContexts:  make(map[string]*TaskContext),
 	}
 }
@@ -254,7 +254,7 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, prompt str
 		Model:   agent.Model,
 		Prompt:  agent.Prompt,
 	}
-	runner := c.runnerManager.CreateRunner(taskID, agentInfo, c)
+	runner := c.runnerManager.CreateRunner(taskID, agentInfo, c.logger)
 	if runner == nil {
 		return fmt.Errorf("failed to create task runner")
 	}
