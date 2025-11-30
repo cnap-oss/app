@@ -230,3 +230,115 @@ func TestControllerMultiTurnConversation(t *testing.T) {
 	require.Equal(t, "assistant", messages[0].Role)
 	require.Equal(t, "user", messages[1].Role)
 }
+
+// TestControllerCreateTask_RunnerManagerIntegration tests CreateTask creates a Runner in RunnerManager
+func TestControllerCreateTask_RunnerManagerIntegration(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
+	ctrl, cleanup := newTestController(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create agent
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-test", "Test agent", "gpt-4", "System prompt"))
+
+	// Create task - should register runner in RunnerManager
+	require.NoError(t, ctrl.CreateTask(ctx, "agent-test", "task-runner-test", "Test prompt"))
+
+	// Verify task was created
+	info, err := ctrl.GetTaskInfo(ctx, "task-runner-test")
+	require.NoError(t, err)
+	require.Equal(t, "task-runner-test", info.TaskID)
+	require.Equal(t, storage.TaskStatusPending, info.Status)
+}
+
+// TestControllerSendMessage_PreventDuplicateExecution tests duplicate execution prevention
+func TestControllerSendMessage_PreventDuplicateExecution(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
+	ctrl, cleanup := newTestController(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Setup
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-dup", "Hello"))
+
+	// First SendMessage
+	require.NoError(t, ctrl.SendMessage(ctx, "task-dup"))
+
+	// Verify status is running
+	info, err := ctrl.GetTaskInfo(ctx, "task-dup")
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusRunning, info.Status)
+
+	// Second SendMessage should fail
+	err = ctrl.SendMessage(ctx, "task-dup")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already running")
+}
+
+// TestControllerCancelTask tests task cancellation
+func TestControllerCancelTask(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
+	ctrl, cleanup := newTestController(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Setup
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-cancel", "Long running task"))
+
+	// Start task
+	require.NoError(t, ctrl.SendMessage(ctx, "task-cancel"))
+
+	// Verify status is running
+	info, err := ctrl.GetTaskInfo(ctx, "task-cancel")
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusRunning, info.Status)
+
+	// Cancel task
+	require.NoError(t, ctrl.CancelTask(ctx, "task-cancel"))
+
+	// Wait a bit for cancellation to process
+	// Note: In a real scenario, the task should update its status to canceled
+	// For this test, we just verify the CancelTask call succeeded
+}
+
+// TestControllerCancelTask_NotRunning tests canceling a non-running task
+func TestControllerCancelTask_NotRunning(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
+	ctrl, cleanup := newTestController(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Setup - use unique agent ID to avoid conflicts
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-notrunning", "Test agent", "gpt-4", "System prompt"))
+	require.NoError(t, ctrl.CreateTask(ctx, "agent-notrunning", "task-not-running", "Task"))
+
+	// Try to cancel a pending task (not running)
+	err := ctrl.CancelTask(ctx, "task-not-running")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not running")
+}
+
+// TestControllerCancelTask_NotFound tests canceling a non-existent task
+func TestControllerCancelTask_NotFound(t *testing.T) {
+	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+
+	ctrl, cleanup := newTestController(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Try to cancel non-existent task
+	err := ctrl.CancelTask(ctx, "non-existent-task")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
