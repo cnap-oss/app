@@ -146,6 +146,16 @@ func (r *Repository) ListTasksByAgent(ctx context.Context, agentID string) ([]Ta
 	return tasks, nil
 }
 
+// DeleteTask는 작업을 hard delete합니다 (실제로 DB에서 삭제).
+func (r *Repository) DeleteTask(ctx context.Context, taskID string) error {
+	if taskID == "" {
+		return fmt.Errorf("storage: empty taskID")
+	}
+	return r.db.WithContext(ctx).
+		Where("task_id = ?", taskID).
+		Delete(&Task{}).Error
+}
+
 // GetNextConversationIndex는 해당 Task의 다음 ConversationIndex를 반환합니다.
 func (r *Repository) GetNextConversationIndex(ctx context.Context, taskID string) (int, error) {
 	if taskID == "" {

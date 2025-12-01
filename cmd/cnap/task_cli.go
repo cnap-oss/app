@@ -21,16 +21,18 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 
 	// task create
 	var createPrompt string
+	var forceCreate bool
 	taskCreateCmd := &cobra.Command{
 		Use:   "create <agent-name> <task-id>",
 		Short: "새로운 Task 생성",
 		Long:  "특정 Agent에 새로운 Task를 생성합니다. --prompt 옵션으로 초기 프롬프트를 설정할 수 있습니다.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTaskCreate(logger, args[0], args[1], createPrompt)
+			return runTaskCreate(logger, args[0], args[1], createPrompt, forceCreate)
 		},
 	}
 	taskCreateCmd.Flags().StringVarP(&createPrompt, "prompt", "p", "", "Task 초기 프롬프트")
+	taskCreateCmd.Flags().BoolVarP(&forceCreate, "force", "f", false, "기존 Task가 있으면 삭제 후 생성")
 
 	// task list
 	taskListCmd := &cobra.Command{
@@ -133,7 +135,7 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 	return taskCmd
 }
 
-func runTaskCreate(logger *zap.Logger, agentName, taskID, prompt string) error {
+func runTaskCreate(logger *zap.Logger, agentName, taskID, prompt string, force bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
@@ -143,7 +145,42 @@ func runTaskCreate(logger *zap.Logger, agentName, taskID, prompt string) error {
 	}
 	defer cleanup()
 
-	if err := ctrl.CreateTask(ctx, agentName, taskID, prompt); err != nil {
+	// Task 생성 시도
+	err = ctrl.CreateTask(ctx, agentName, taskID, prompt)
+
+	// UNIQUE constraint 에러 확인
+	if err != nil && contains(err.Error(), "UNIQUE constraint failed") {
+		if force {
+			// --force 플래그 사용 시 기존 Task 조회 후 삭제
+			fmt.Printf("⚠ Task '%s'가 이미 존재합니다. 삭제 후 재생성합니다.\n", taskID)
+
+			// 기존 Task 정보 조회
+			existingTask, getErr := ctrl.GetTaskInfo(ctx, taskID)
+			if getErr == nil {
+				fmt.Printf("  기존 Task 정보: Agent=%s, Status=%s\n", existingTask.AgentID, existingTask.Status)
+			}
+
+			// 기존 Task 삭제 (soft delete)
+			deleteErr := ctrl.DeleteTask(ctx, taskID)
+			if deleteErr != nil {
+				return fmt.Errorf("기존 task 삭제 실패: %w", deleteErr)
+			}
+
+			// 다시 생성 시도
+			err = ctrl.CreateTask(ctx, agentName, taskID, prompt)
+			if err != nil {
+				return fmt.Errorf("task 재생성 실패: %w", err)
+			}
+		} else {
+			// --force 없이 중복 시 사용자에게 안내
+			fmt.Printf("❌ Task '%s'가 이미 존재합니다.\n", taskID)
+			fmt.Printf("\n다음 옵션을 사용하세요:\n")
+			fmt.Printf("  1. 다른 Task ID 사용: ./bin/cnap task create %s <new-task-id>\n", agentName)
+			fmt.Printf("  2. 기존 Task 삭제 후 생성: ./bin/cnap task create %s %s --force\n", agentName, taskID)
+			fmt.Printf("  3. 기존 Task 확인: ./bin/cnap task view %s\n", taskID)
+			return fmt.Errorf("task ID 중복")
+		}
+	} else if err != nil {
 		return fmt.Errorf("task 생성 실패: %w", err)
 	}
 
@@ -153,6 +190,16 @@ func runTaskCreate(logger *zap.Logger, agentName, taskID, prompt string) error {
 		fmt.Printf("✓ Task '%s' 생성 완료 (Agent: %s)\n", taskID, agentName)
 	}
 	return nil
+}
+
+// contains는 문자열에 부분 문자열이 포함되어 있는지 확인합니다.
+func contains(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 func truncateString(s string, maxLen int) string {

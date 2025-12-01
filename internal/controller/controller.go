@@ -353,6 +353,40 @@ func (c *Controller) ListTasksByAgent(ctx context.Context, agentID string) ([]st
 	return tasks, nil
 }
 
+// DeleteTask는 작업을 삭제합니다 (hard delete).
+func (c *Controller) DeleteTask(ctx context.Context, taskID string) error {
+	c.logger.Info("Deleting task",
+		zap.String("task_id", taskID),
+	)
+
+	if c.repo == nil {
+		return fmt.Errorf("controller: repository is not configured")
+	}
+
+	// Task 존재 여부 확인
+	_, err := c.repo.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("task not found: %s", taskID)
+		}
+		return err
+	}
+
+	// Soft delete (status를 deleted로 변경)
+	if err := c.repo.DeleteTask(ctx, taskID); err != nil {
+		c.logger.Error("Failed to delete task", zap.Error(err))
+		return err
+	}
+
+	// Runner도 삭제
+	c.runnerManager.DeleteRunner(taskID)
+
+	c.logger.Info("Task deleted successfully",
+		zap.String("task_id", taskID),
+	)
+	return nil
+}
+
 // TaskInfo는 작업 정보를 나타냅니다.
 type TaskInfo struct {
 	TaskID    string
