@@ -125,35 +125,23 @@ func runAgentCreate(logger *zap.Logger) error {
 	description, _ := reader.ReadString('\n')
 	description = normalizeInput(strings.TrimSpace(description))
 
-	// Provider 선택
-	fmt.Print("프로바이더 (opencode/gemini/claude/openai/xai) [opencode]: ")
-	provider, _ := reader.ReadString('\n')
-	provider = strings.TrimSpace(strings.ToLower(provider))
-	if provider == "" {
-		provider = "opencode"
-	}
+	// 사용 가능한 모델 안내
+	fmt.Println("\n사용 가능한 모델:")
+	fmt.Println("  - claude-sonnet-4-5  (Anthropic Claude)")
+	fmt.Println("  - gpt-5.1            (OpenAI GPT)")
+	fmt.Println("  - gemini-3-pro       (Google Gemini)")
+	fmt.Println("  - grok-code          (xAI Grok, 무료)")
+	fmt.Println()
 
-	// Provider별 추천 모델 표시
-	var modelHint string
-	switch provider {
-	case "gemini":
-		modelHint = "gemini-3-pro"
-	case "claude":
-		modelHint = "claude-sonnet-4-5"
-	case "openai":
-		modelHint = "gpt-5.1"
-	case "xai":
-		modelHint = "grok-code"
-	default:
-		modelHint = "claude-sonnet-4-5"
-	}
-
-	fmt.Printf("모델 (예: %s): ", modelHint)
+	fmt.Print("모델 [claude-sonnet-4-5]: ")
 	model, _ := reader.ReadString('\n')
 	model = normalizeInput(strings.TrimSpace(model))
+	if model == "" {
+		model = "claude-sonnet-4-5"
+	}
 
-	// API Key 확인 및 설정
-	if err := ensureAPIKey(provider); err != nil {
+	// OpenCode API Key 확인 및 설정
+	if err := ensureOpenCodeAPIKey(); err != nil {
 		return fmt.Errorf("API 키 설정 실패: %w", err)
 	}
 
@@ -166,32 +154,18 @@ func runAgentCreate(logger *zap.Logger) error {
 		return fmt.Errorf("유효하지 않은 Agent 이름: %w", err)
 	}
 
-	// Agent 생성
-	if err := ctrl.CreateAgent(ctx, name, description, provider, model, prompt); err != nil {
+	// Agent 생성 (provider는 항상 opencode)
+	if err := ctrl.CreateAgent(ctx, name, description, "opencode", model, prompt); err != nil {
 		return fmt.Errorf("agent 생성 실패: %w", err)
 	}
 
-	fmt.Printf("✓ Agent '%s' 생성 완료 (Provider: %s, Model: %s)\n", name, provider, model)
+	fmt.Printf("✓ Agent '%s' 생성 완료 (Model: %s)\n", name, model)
 	return nil
 }
 
-// ensureAPIKey는 provider에 필요한 API 키가 설정되어 있는지 확인하고, 없으면 입력받습니다.
-func ensureAPIKey(provider string) error {
-	var envKey string
-	switch provider {
-	case "opencode":
-		envKey = "OPEN_CODE_API_KEY"
-	case "gemini":
-		envKey = "GEMINI_API_KEY"
-	case "claude":
-		envKey = "ANTHROPIC_API_KEY"
-	case "openai":
-		envKey = "OPENAI_API_KEY"
-	case "xai":
-		envKey = "XAI_API_KEY"
-	default:
-		return fmt.Errorf("지원하지 않는 프로바이더: %s", provider)
-	}
+// ensureOpenCodeAPIKey는 OPEN_CODE_API_KEY가 설정되어 있는지 확인하고, 없으면 입력받습니다.
+func ensureOpenCodeAPIKey() error {
+	const envKey = "OPEN_CODE_API_KEY"
 
 	// 환경 변수에 이미 설정되어 있는지 확인
 	if os.Getenv(envKey) != "" {
@@ -201,7 +175,7 @@ func ensureAPIKey(provider string) error {
 
 	// 환경 변수에 없으면 입력받기
 	fmt.Printf("⚠ %s가 설정되지 않았습니다.\n", envKey)
-	fmt.Printf("API Key를 입력하세요 (Enter를 누르면 건너뛰기): ")
+	fmt.Printf("OpenCode API Key를 입력하세요 (Enter를 누르면 건너뛰기): ")
 
 	reader := bufio.NewReader(os.Stdin)
 	apiKey, _ := reader.ReadString('\n')
@@ -347,13 +321,6 @@ func runAgentEdit(logger *zap.Logger, agentName string) error {
 		description = agent.Description
 	}
 
-	fmt.Printf("프로바이더 (현재: %s) [opencode/gemini/claude/openai/xai]: ", agent.Provider)
-	provider, _ := reader.ReadString('\n')
-	provider = strings.TrimSpace(strings.ToLower(provider))
-	if provider == "" {
-		provider = agent.Provider
-	}
-
 	fmt.Printf("모델 (현재: %s): ", agent.Model)
 	model, _ := reader.ReadString('\n')
 	model = normalizeInput(strings.TrimSpace(model))
@@ -368,8 +335,8 @@ func runAgentEdit(logger *zap.Logger, agentName string) error {
 		prompt = agent.Prompt
 	}
 
-	// Agent 수정
-	if err := ctrl.UpdateAgent(ctx, agentName, description, provider, model, prompt); err != nil {
+	// Agent 수정 (provider는 항상 opencode)
+	if err := ctrl.UpdateAgent(ctx, agentName, description, "opencode", model, prompt); err != nil {
 		return fmt.Errorf("agent 수정 실패: %w", err)
 	}
 
