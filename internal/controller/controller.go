@@ -22,22 +22,43 @@ type TaskContext struct {
 	cancel context.CancelFunc
 }
 
+// TaskEvent는 Task 실행 이벤트를 나타냅니다.
+type TaskEvent struct {
+	Type     string // "execute", "cancel"
+	TaskID   string
+	ThreadID string // Discord thread ID
+	Prompt   string // 사용자 메시지 (optional)
+}
+
+// TaskResult는 Task 실행 결과를 나타냅니다.
+type TaskResult struct {
+	TaskID   string
+	ThreadID string
+	Status   string // "completed", "failed"
+	Content  string
+	Error    error
+}
+
 // Controller는 에이전트 생성 및 관리를 담당하며, supervisor 기능도 포함합니다.
 type Controller struct {
-	logger        *zap.Logger
-	repo          *storage.Repository
-	runnerManager *taskrunner.RunnerManager
-	taskContexts  map[string]*TaskContext
-	mu            sync.RWMutex
+	logger         *zap.Logger
+	repo           *storage.Repository
+	runnerManager  *taskrunner.RunnerManager
+	taskContexts   map[string]*TaskContext
+	mu             sync.RWMutex
+	taskEventChan  chan TaskEvent
+	taskResultChan chan TaskResult
 }
 
 // NewController는 새로운 Controller를 생성합니다.
-func NewController(logger *zap.Logger, repo *storage.Repository) *Controller {
+func NewController(logger *zap.Logger, repo *storage.Repository, eventChan chan TaskEvent, resultChan chan TaskResult) *Controller {
 	return &Controller{
-		logger:        logger,
-		repo:          repo,
-		runnerManager: taskrunner.GetRunnerManager(),
-		taskContexts:  make(map[string]*TaskContext),
+		logger:         logger,
+		repo:           repo,
+		runnerManager:  taskrunner.GetRunnerManager(),
+		taskContexts:   make(map[string]*TaskContext),
+		taskEventChan:  eventChan,
+		taskResultChan: resultChan,
 	}
 }
 
@@ -45,7 +66,10 @@ func NewController(logger *zap.Logger, repo *storage.Repository) *Controller {
 func (c *Controller) Start(ctx context.Context) error {
 	c.logger.Info("Starting controller server")
 
-	// 더미 프로세스 - 실제 구현 시 여기에 controller 로직 추가
+	// 이벤트 루프 시작 (별도 goroutine)
+	go c.eventLoop(ctx)
+
+	// 하트비트
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -706,6 +730,309 @@ func (c *Controller) CancelTask(ctx context.Context, taskID string) error {
 	)
 
 	return nil
+}
+
+// eventLoop는 Task 이벤트를 처리하는 메인 루프입니다.
+func (c *Controller) eventLoop(ctx context.Context) {
+	c.logger.Info("Event loop started")
+	defer c.logger.Info("Event loop stopped")
+
+	for {
+		select {
+		case event := <-c.taskEventChan:
+			// 각 이벤트를 별도 goroutine으로 처리 (병렬 처리)
+			go c.handleTaskEvent(ctx, event)
+
+		case <-ctx.Done():
+			c.logger.Info("Event loop shutting down")
+			return
+		}
+	}
+}
+
+// handleTaskEvent는 단일 Task 이벤트를 처리합니다.
+func (c *Controller) handleTaskEvent(ctx context.Context, event TaskEvent) {
+	c.logger.Info("Handling task event",
+		zap.String("type", event.Type),
+		zap.String("task_id", event.TaskID),
+		zap.String("thread_id", event.ThreadID),
+	)
+
+	switch event.Type {
+	case "execute":
+		c.handleExecuteEvent(ctx, event)
+	case "cancel":
+		c.handleCancelEvent(ctx, event)
+	default:
+		c.logger.Warn("Unknown event type",
+			zap.String("type", event.Type),
+			zap.String("task_id", event.TaskID),
+		)
+	}
+}
+
+// handleExecuteEvent는 Task 실행 이벤트를 처리합니다.
+func (c *Controller) handleExecuteEvent(ctx context.Context, event TaskEvent) {
+	// Task 조회
+	task, err := c.repo.GetTask(ctx, event.TaskID)
+	if err != nil {
+		c.logger.Error("Failed to get task",
+			zap.String("task_id", event.TaskID),
+			zap.Error(err),
+		)
+		c.taskResultChan <- TaskResult{
+			TaskID:   event.TaskID,
+			ThreadID: event.ThreadID,
+			Status:   "failed",
+			Error:    fmt.Errorf("task not found: %w", err),
+		}
+		return
+	}
+
+	// 상태를 running으로 변경
+	if err := c.repo.UpsertTaskStatus(ctx, event.TaskID, task.AgentID, storage.TaskStatusRunning); err != nil {
+		c.logger.Error("Failed to update task status",
+			zap.String("task_id", event.TaskID),
+			zap.Error(err),
+		)
+		c.taskResultChan <- TaskResult{
+			TaskID:   event.TaskID,
+			ThreadID: event.ThreadID,
+			Status:   "failed",
+			Error:    fmt.Errorf("failed to update status: %w", err),
+		}
+		return
+	}
+
+	// Task 실행 (별도 함수로 분리하여 결과 처리)
+	c.executeTaskWithResult(ctx, event.TaskID, event.ThreadID, task)
+}
+
+// handleCancelEvent는 Task 취소 이벤트를 처리합니다.
+func (c *Controller) handleCancelEvent(ctx context.Context, event TaskEvent) {
+	c.logger.Info("Canceling task",
+		zap.String("task_id", event.TaskID),
+	)
+
+	// TaskContext에서 cancel 호출
+	c.mu.RLock()
+	taskCtx, ok := c.taskContexts[event.TaskID]
+	c.mu.RUnlock()
+
+	if !ok {
+		c.logger.Warn("Task context not found for cancellation",
+			zap.String("task_id", event.TaskID),
+		)
+		c.taskResultChan <- TaskResult{
+			TaskID:   event.TaskID,
+			ThreadID: event.ThreadID,
+			Status:   "failed",
+			Error:    fmt.Errorf("task not running"),
+		}
+		return
+	}
+
+	// Context 취소
+	taskCtx.cancel()
+
+	c.taskResultChan <- TaskResult{
+		TaskID:   event.TaskID,
+		ThreadID: event.ThreadID,
+		Status:   "canceled",
+		Content:  "Task canceled by user",
+	}
+}
+
+// executeTaskWithResult는 Task를 실행하고 결과를 resultChan으로 전송합니다.
+func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID string, task *storage.Task) {
+	defer func() {
+		// TaskContext 정리
+		c.mu.Lock()
+		if taskCtx, ok := c.taskContexts[taskID]; ok {
+			taskCtx.cancel()
+			delete(c.taskContexts, taskID)
+		}
+		c.mu.Unlock()
+
+		if r := recover(); r != nil {
+			c.logger.Error("Task execution panicked",
+				zap.String("task_id", taskID),
+				zap.Any("panic", r),
+			)
+			_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusFailed)
+
+			c.taskResultChan <- TaskResult{
+				TaskID:   taskID,
+				ThreadID: threadID,
+				Status:   "failed",
+				Error:    fmt.Errorf("panic: %v", r),
+			}
+		}
+	}()
+
+	// Task 실행을 위한 context 생성 (5분 타임아웃)
+	taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+
+	// TaskContext 저장
+	c.mu.Lock()
+	c.taskContexts[taskID] = &TaskContext{
+		ctx:    taskCtx,
+		cancel: cancel,
+	}
+	c.mu.Unlock()
+
+	// Agent 정보 조회
+	agent, err := c.repo.GetAgent(ctx, task.AgentID)
+	if err != nil {
+		c.logger.Error("Failed to get agent info", zap.Error(err))
+		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+
+		c.taskResultChan <- TaskResult{
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Status:   "failed",
+			Error:    fmt.Errorf("agent not found: %w", err),
+		}
+		return
+	}
+
+	// RunnerManager에서 TaskRunner 조회 또는 생성
+	runner := c.runnerManager.GetRunner(taskID)
+	if runner == nil {
+		c.logger.Info("Runner not found, creating...",
+			zap.String("task_id", taskID),
+		)
+
+		agentInfo := taskrunner.AgentInfo{
+			AgentID:  agent.AgentID,
+			Provider: agent.Provider,
+			Model:    agent.Model,
+			Prompt:   agent.Prompt,
+		}
+		runner = c.runnerManager.CreateRunner(taskID, agentInfo, c.logger)
+	}
+
+	// 메시지 목록 조회
+	messages, err := c.repo.ListMessageIndexByTask(ctx, taskID)
+	if err != nil {
+		c.logger.Error("Failed to list messages", zap.Error(err))
+		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+
+		c.taskResultChan <- TaskResult{
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Status:   "failed",
+			Error:    fmt.Errorf("failed to list messages: %w", err),
+		}
+		return
+	}
+
+	// ChatMessage로 변환
+	chatMessages := make([]taskrunner.ChatMessage, 0, len(messages))
+	for _, msg := range messages {
+		content, err := c.readMessageFromFile(msg.FilePath)
+		if err != nil {
+			c.logger.Warn("Failed to read message file, skipping",
+				zap.String("file_path", msg.FilePath),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		chatMessages = append(chatMessages, taskrunner.ChatMessage{
+			Role:    msg.Role,
+			Content: content,
+		})
+	}
+
+	// Prompt가 있으면 추가
+	if task.Prompt != "" {
+		chatMessages = append(chatMessages, taskrunner.ChatMessage{
+			Role:    "user",
+			Content: task.Prompt,
+		})
+	}
+
+	// RunRequest 구성
+	req := &taskrunner.RunRequest{
+		TaskID:       taskID,
+		Model:        agent.Model,
+		SystemPrompt: agent.Prompt,
+		Messages:     chatMessages,
+	}
+
+	// TaskRunner 실행
+	result, err := runner.Run(taskCtx, req)
+
+	// Context 취소/타임아웃 확인
+	if taskCtx.Err() != nil {
+		c.logger.Warn("Task execution canceled or timed out",
+			zap.String("task_id", taskID),
+			zap.Error(taskCtx.Err()),
+		)
+
+		status := storage.TaskStatusFailed
+		if errors.Is(taskCtx.Err(), context.Canceled) {
+			status = storage.TaskStatusCanceled
+		}
+		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, status)
+
+		c.taskResultChan <- TaskResult{
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Status:   status,
+			Error:    taskCtx.Err(),
+		}
+
+		c.runnerManager.DeleteRunner(taskID)
+		return
+	}
+
+	// 실행 결과 처리
+	if err != nil {
+		c.logger.Error("Task execution failed",
+			zap.String("task_id", taskID),
+			zap.Error(err),
+		)
+		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusFailed)
+
+		c.taskResultChan <- TaskResult{
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Status:   "failed",
+			Error:    err,
+		}
+	} else {
+		c.logger.Info("Task execution completed",
+			zap.String("task_id", taskID),
+			zap.Bool("success", result != nil && result.Success),
+		)
+
+		// 결과를 파일로 저장
+		if result.Success {
+			filePath, err := c.saveMessageToFile(context.Background(), taskID, "assistant", result.Output)
+			if err != nil {
+				c.logger.Error("Failed to save result to file", zap.Error(err))
+			} else {
+				// MessageIndex에 추가
+				if _, err := c.repo.AppendMessageIndex(context.Background(), taskID, "assistant", filePath); err != nil {
+					c.logger.Error("Failed to append message index", zap.Error(err))
+				}
+			}
+		}
+
+		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusCompleted)
+
+		c.taskResultChan <- TaskResult{
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Status:   "completed",
+			Content:  result.Output,
+		}
+	}
+
+	// Runner 정리
+	c.runnerManager.DeleteRunner(taskID)
 }
 
 // executeTask는 Task를 비동기로 실행합니다.
