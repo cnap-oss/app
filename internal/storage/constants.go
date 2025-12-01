@@ -18,6 +18,7 @@ const (
 	TaskStatusCompleted = "completed"
 	TaskStatusFailed    = "failed"
 	TaskStatusCanceled  = "canceled"
+	TaskStatusDeleted   = "deleted"
 
 	RunStepStatusPending   = "pending"
 	RunStepStatusRunning   = "running"
