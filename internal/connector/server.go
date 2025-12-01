@@ -29,19 +29,23 @@ const (
 
 // Server는 Discord 봇의 세션, 로거, 에이전트 데이터 등 모든 상태를 관리하는 중앙 구조체입니다.
 type Server struct {
-	logger        *zap.Logger
-	session       *discordgo.Session
-	controller    *controller.Controller
-	threadsMutex  sync.RWMutex
-	activeThreads map[string]string
+	logger         *zap.Logger
+	session        *discordgo.Session
+	controller     *controller.Controller
+	threadsMutex   sync.RWMutex
+	activeThreads  map[string]string
+	taskEventChan  chan controller.TaskEvent
+	taskResultChan <-chan controller.TaskResult
 }
 
 // NewServer는 새로운 connector 서버를 생성하고 초기화합니다.
-func NewServer(logger *zap.Logger, ctrl *controller.Controller) *Server {
+func NewServer(logger *zap.Logger, ctrl *controller.Controller, eventChan chan controller.TaskEvent, resultChan <-chan controller.TaskResult) *Server {
 	return &Server{
-		logger:        logger,
-		controller:    ctrl,
-		activeThreads: make(map[string]string),
+		logger:         logger,
+		controller:     ctrl,
+		activeThreads:  make(map[string]string),
+		taskEventChan:  eventChan,
+		taskResultChan: resultChan,
 	}
 }
 
@@ -74,6 +78,9 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	s.logger.Info("Bot is now running.")
+
+	// 결과 핸들러 goroutine 시작
+	go s.resultHandler(ctx)
 
 	// 컨텍스트가 취소될 때까지 대기
 	<-ctx.Done()
@@ -308,22 +315,49 @@ func (s *Server) startAgentThread(i *discordgo.InteractionCreate, agentName stri
 
 // callAgentInThread는 활성화된 에이전트 스레드 내에서 메시지를 처리합니다.
 func (s *Server) callAgentInThread(m *discordgo.Message, agent *controller.AgentInfo) {
-	if m.Content == "안녕!" {
-		if _, err := s.session.ChannelMessageSend(m.ChannelID, "안녕하세요!"); err != nil {
-			s.logger.Error("Failed to send greeting message", zap.Error(err), zap.String("channel_id", m.ChannelID))
-		}
+	ctx := context.Background()
+
+	// Task ID 생성 (Discord message ID 기반)
+	taskID := fmt.Sprintf("task-%s", m.ID)
+	threadID := m.ChannelID
+
+	s.logger.Info("Creating task for agent call",
+		zap.String("agent", agent.Name),
+		zap.String("task_id", taskID),
+		zap.String("thread_id", threadID),
+		zap.String("user_message", m.Content),
+	)
+
+	// 1. Task 생성
+	if err := s.controller.CreateTask(ctx, agent.Name, taskID, m.Content); err != nil {
+		s.logger.Error("Failed to create task", zap.Error(err))
+		_, _ = s.session.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Task 생성 실패: %v", err))
 		return
 	}
 
+	// 2. "처리 중" 메시지 전송
 	embed := &discordgo.MessageEmbed{
 		Author:      &discordgo.MessageEmbedAuthor{Name: m.Author.Username, IconURL: m.Author.AvatarURL("")},
 		Description: m.Content,
 		Color:       0x0099ff, // Blue
-		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("'%s'에게 전달됨 (실행 기능은 미구현)", agent.Name)},
+		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("'%s'가 처리 중입니다...", agent.Name)},
 	}
 	if _, err := s.session.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
-		s.logger.Error("Failed to send agent response embed", zap.Error(err), zap.String("channel_id", m.ChannelID))
+		s.logger.Error("Failed to send processing message", zap.Error(err))
 	}
+
+	// 3. Task 실행 이벤트 전송 (비동기, 논블로킹)
+	s.taskEventChan <- controller.TaskEvent{
+		Type:     "execute",
+		TaskID:   taskID,
+		ThreadID: threadID,
+		Prompt:   m.Content,
+	}
+
+	s.logger.Info("Task execution event sent",
+		zap.String("task_id", taskID),
+		zap.String("agent", agent.Name),
+	)
 }
 
 // showAgentList는 현재 등록된 모든 에이전트의 목록을 Discord에 표시합니다.
@@ -460,5 +494,114 @@ func (s *Server) showCreateOrEditModal(i *discordgo.InteractionCreate, originalN
 	err := s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: modal})
 	if err != nil {
 		s.logger.Error("Failed to show create/edit modal", zap.Error(err))
+	}
+}
+
+// resultHandler는 Task 실행 결과를 처리하는 goroutine입니다.
+func (s *Server) resultHandler(ctx context.Context) {
+	s.logger.Info("Result handler started")
+	defer s.logger.Info("Result handler stopped")
+
+	for {
+		select {
+		case result := <-s.taskResultChan:
+			s.logger.Info("Received task result",
+				zap.String("task_id", result.TaskID),
+				zap.String("thread_id", result.ThreadID),
+				zap.String("status", result.Status),
+			)
+			s.sendResultToDiscord(result)
+
+		case <-ctx.Done():
+			s.logger.Info("Result handler shutting down")
+			return
+		}
+	}
+}
+
+// sendResultToDiscord는 Task 실행 결과를 Discord Thread에 전송합니다.
+func (s *Server) sendResultToDiscord(result controller.TaskResult) {
+	if result.ThreadID == "" {
+		s.logger.Warn("Thread ID is empty, cannot send result",
+			zap.String("task_id", result.TaskID),
+		)
+		return
+	}
+
+	// Embed 메시지 생성
+	var embed *discordgo.MessageEmbed
+
+	if result.Error != nil || result.Status == "failed" {
+		// 실패 시 빨간색
+		embed = &discordgo.MessageEmbed{
+			Title: "❌ Task 실행 실패",
+			Color: 0xff0000, // 빨간색
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Task ID", Value: result.TaskID, Inline: true},
+				{Name: "Status", Value: result.Status, Inline: true},
+			},
+		}
+
+		if result.Error != nil {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:  "오류",
+				Value: result.Error.Error(),
+			})
+		}
+	} else if result.Status == "canceled" {
+		// 취소 시 노란색
+		embed = &discordgo.MessageEmbed{
+			Title: "⚠️ Task 취소됨",
+			Color: 0xffff00, // 노란색
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Task ID", Value: result.TaskID, Inline: true},
+				{Name: "Status", Value: result.Status, Inline: true},
+			},
+		}
+
+		if result.Content != "" {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:  "메시지",
+				Value: result.Content,
+			})
+		}
+	} else {
+		// 성공 시 초록색
+		embed = &discordgo.MessageEmbed{
+			Title: "✅ Task 실행 완료",
+			Color: 0x00ff00, // 초록색
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Task ID", Value: result.TaskID, Inline: true},
+				{Name: "Status", Value: result.Status, Inline: true},
+			},
+		}
+
+		// 결과 내용 추가 (너무 길면 잘라내기)
+		content := result.Content
+		if len(content) > 1000 {
+			content = content[:1000] + "...\n(결과가 너무 길어 잘렸습니다)"
+		}
+
+		if content != "" {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:  "결과",
+				Value: content,
+			})
+		}
+	}
+
+	// Discord에 메시지 전송
+	_, err := s.session.ChannelMessageSendEmbed(result.ThreadID, embed)
+	if err != nil {
+		s.logger.Error("Failed to send result to Discord",
+			zap.String("task_id", result.TaskID),
+			zap.String("thread_id", result.ThreadID),
+			zap.Error(err),
+		)
+	} else {
+		s.logger.Info("Result sent to Discord",
+			zap.String("task_id", result.TaskID),
+			zap.String("thread_id", result.ThreadID),
+		)
 	}
 }
