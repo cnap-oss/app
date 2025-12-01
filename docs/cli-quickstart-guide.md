@@ -155,8 +155,20 @@ my-assistant   active  claude-sonnet-4-5   개인 비서 AI   2025-11-30 23:15
 수정일:      2025-11-30 23:15:30
 ```
 
-### Step 3: Task 생성 (프롬프트 포함)
+### Step 3: Task 생성
 
+#### 방법 1: Task ID 자동 생성 (추천)
+```bash
+./bin/cnap task create my-assistant --prompt "2+2는 얼마인가요?"
+```
+
+**출력:**
+```
+ℹ 자동 생성된 Task ID: task-1733012345
+✓ Task 'task-1733012345' 생성 완료 (Agent: my-assistant, Prompt: 2+2는 얼마인가요?)
+```
+
+#### 방법 2: 수동으로 Task ID 지정
 ```bash
 ./bin/cnap task create my-assistant task-001 --prompt "2+2는 얼마인가요?"
 ```
@@ -166,9 +178,10 @@ my-assistant   active  claude-sonnet-4-5   개인 비서 AI   2025-11-30 23:15
 ✓ Task 'task-001' 생성 완료 (Agent: my-assistant, Prompt: 2+2는 얼마인가요?)
 ```
 
-**프롬프트 없이 생성:**
+**Task ID 중복 시:**
 ```bash
-./bin/cnap task create my-assistant task-002
+# --force 플래그로 기존 Task 삭제 후 재생성
+./bin/cnap task create my-assistant task-001 --prompt "새 프롬프트" --force
 ```
 
 ### Step 4: Task 확인

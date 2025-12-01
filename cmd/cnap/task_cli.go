@@ -23,12 +23,16 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 	var createPrompt string
 	var forceCreate bool
 	taskCreateCmd := &cobra.Command{
-		Use:   "create <agent-name> <task-id>",
+		Use:   "create <agent-name> [task-id]",
 		Short: "새로운 Task 생성",
-		Long:  "특정 Agent에 새로운 Task를 생성합니다. --prompt 옵션으로 초기 프롬프트를 설정할 수 있습니다.",
-		Args:  cobra.ExactArgs(2),
+		Long:  "특정 Agent에 새로운 Task를 생성합니다. task-id를 생략하면 자동으로 생성됩니다.",
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTaskCreate(logger, args[0], args[1], createPrompt, forceCreate)
+			taskID := ""
+			if len(args) == 2 {
+				taskID = args[1]
+			}
+			return runTaskCreate(logger, args[0], taskID, createPrompt, forceCreate)
 		},
 	}
 	taskCreateCmd.Flags().StringVarP(&createPrompt, "prompt", "p", "", "Task 초기 프롬프트")
@@ -145,6 +149,12 @@ func runTaskCreate(logger *zap.Logger, agentName, taskID, prompt string, force b
 	}
 	defer cleanup()
 
+	// Task ID가 없으면 자동 생성
+	if taskID == "" {
+		taskID = generateTaskID()
+		fmt.Printf("ℹ 자동 생성된 Task ID: %s\n", taskID)
+	}
+
 	// Task 생성 시도
 	err = ctrl.CreateTask(ctx, agentName, taskID, prompt)
 
@@ -190,6 +200,11 @@ func runTaskCreate(logger *zap.Logger, agentName, taskID, prompt string, force b
 		fmt.Printf("✓ Task '%s' 생성 완료 (Agent: %s)\n", taskID, agentName)
 	}
 	return nil
+}
+
+// generateTaskID는 타임스탬프 기반의 고유한 Task ID를 생성합니다.
+func generateTaskID() string {
+	return fmt.Sprintf("task-%d", time.Now().Unix())
 }
 
 // contains는 문자열에 부분 문자열이 포함되어 있는지 확인합니다.
