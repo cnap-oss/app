@@ -45,7 +45,7 @@ WORKDIR /app
 COPY --from=builder /build/cnap .
 
 # Copy configs if they exist
-COPY --from=builder /build/configs ./configs 2>/dev/null || true
+COPY --from=builder /build/configs ./configs
 
 # Create data directory for SQLite
 RUN mkdir -p /app/data && \

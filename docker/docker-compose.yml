@@ -11,7 +11,7 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ../../data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cnap}"]
       interval: 10s
@@ -36,15 +36,9 @@ services:
     env_file:
       - ../internal/connector/.env
     volumes:
-      - app_data:/app/data
+      - ../../data/app:/app/data
     networks:
       - cnap-network
-
-volumes:
-  postgres_data:
-    driver: local
-  app_data:
-    driver: local
 
 networks:
   cnap-network:
