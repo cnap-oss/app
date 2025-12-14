@@ -70,28 +70,50 @@ func (s *Server) startAgentThread(i *discordgo.InteractionCreate, agentName stri
 }
 
 // callAgentInThread는 활성화된 에이전트 스레드 내에서 메시지를 처리합니다.
+// Thread ID를 Task ID로 사용하여 하나의 Thread 내 모든 대화가 동일한 Task에서 처리됩니다.
 func (s *Server) callAgentInThread(m *discordgo.Message, agent *controller.AgentInfo) {
 	ctx := context.Background()
 
-	// Task ID 생성 (Discord message ID 기반)
-	taskID := fmt.Sprintf("task-%s", m.ID)
+	// Thread ID를 Task ID로 사용 (Thread-Task 1:1 매핑)
+	taskID := m.ChannelID
 	threadID := m.ChannelID
 
-	s.logger.Info("Creating task for agent call",
+	s.logger.Info("Processing message in thread",
 		zap.String("agent", agent.Name),
 		zap.String("task_id", taskID),
 		zap.String("thread_id", threadID),
 		zap.String("user_message", m.Content),
 	)
 
-	// 1. Task 생성
-	if err := s.controller.CreateTask(ctx, agent.Name, taskID, m.Content); err != nil {
-		s.logger.Error("Failed to create task", zap.Error(err))
-		_, _ = s.session.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Task 생성 실패: %v", err))
-		return
+	// Task 존재 여부 확인
+	existingTask, err := s.controller.GetTask(ctx, taskID)
+	if err != nil {
+		// Task가 없으면 새로 생성 (Thread 첫 메시지)
+		s.logger.Info("Creating new task for thread",
+			zap.String("task_id", taskID),
+			zap.String("agent", agent.Name),
+		)
+
+		if err := s.controller.CreateTask(ctx, agent.Name, taskID, m.Content); err != nil {
+			s.logger.Error("Failed to create task", zap.Error(err))
+			_, _ = s.session.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Task 생성 실패: %v", err))
+			return
+		}
+	} else {
+		// Task가 있으면 메시지만 추가 (Thread 후속 메시지)
+		s.logger.Info("Adding message to existing task",
+			zap.String("task_id", taskID),
+			zap.String("existing_status", existingTask.Status),
+		)
+
+		if err := s.controller.AddMessage(ctx, taskID, "user", m.Content); err != nil {
+			s.logger.Error("Failed to add message to task", zap.Error(err))
+			_, _ = s.session.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ 메시지 추가 실패: %v", err))
+			return
+		}
 	}
 
-	// 2. "처리 중" 메시지 전송
+	// "처리 중" 메시지 전송
 	embed := &discordgo.MessageEmbed{
 		Author:      &discordgo.MessageEmbedAuthor{Name: m.Author.Username, IconURL: m.Author.AvatarURL("")},
 		Description: m.Content,
@@ -102,7 +124,7 @@ func (s *Server) callAgentInThread(m *discordgo.Message, agent *controller.Agent
 		s.logger.Error("Failed to send processing message", zap.Error(err))
 	}
 
-	// 3. Task 실행 이벤트 전송 (비동기, 논블로킹)
+	// Task 실행 이벤트 전송 (비동기, 논블로킹)
 	s.connectorEventChan <- controller.ConnectorEvent{
 		Type:     "execute",
 		TaskID:   taskID,
