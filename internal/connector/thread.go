@@ -103,7 +103,7 @@ func (s *Server) callAgentInThread(m *discordgo.Message, agent *controller.Agent
 	}
 
 	// 3. Task 실행 이벤트 전송 (비동기, 논블로킹)
-	s.taskEventChan <- controller.TaskEvent{
+	s.connectorEventChan <- controller.ConnectorEvent{
 		Type:     "execute",
 		TaskID:   taskID,
 		ThreadID: threadID,

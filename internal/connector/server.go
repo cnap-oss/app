@@ -19,18 +19,18 @@ type Server struct {
 	controller     *controller.Controller
 	threadsMutex   sync.RWMutex
 	activeThreads  map[string]string
-	taskEventChan  chan controller.TaskEvent
-	taskResultChan <-chan controller.TaskResult
+	connectorEventChan  chan controller.ConnectorEvent
+	controllerEventChan <-chan controller.ControllerEvent
 }
 
 // NewServer는 새로운 connector 서버를 생성하고 초기화합니다.
-func NewServer(logger *zap.Logger, ctrl *controller.Controller, eventChan chan controller.TaskEvent, resultChan <-chan controller.TaskResult) *Server {
+func NewServer(logger *zap.Logger, ctrl *controller.Controller, eventChan chan controller.ConnectorEvent, resultChan <-chan controller.ControllerEvent) *Server {
 	return &Server{
-		logger:         logger,
-		controller:     ctrl,
-		activeThreads:  make(map[string]string),
-		taskEventChan:  eventChan,
-		taskResultChan: resultChan,
+		logger:              logger,
+		controller:          ctrl,
+		activeThreads:       make(map[string]string),
+		connectorEventChan:  eventChan,
+		controllerEventChan: resultChan,
 	}
 }
 

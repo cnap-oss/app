@@ -15,8 +15,8 @@ func (s *Server) resultHandler(ctx context.Context) {
 
 	for {
 		select {
-		case result := <-s.taskResultChan:
-			s.logger.Info("Received task result",
+		case result := <-s.controllerEventChan:
+			s.logger.Info("Received controller event",
 				zap.String("task_id", result.TaskID),
 				zap.String("thread_id", result.ThreadID),
 				zap.String("status", result.Status),
@@ -31,7 +31,7 @@ func (s *Server) resultHandler(ctx context.Context) {
 }
 
 // sendResultToDiscord는 Task 실행 결과를 Discord Thread에 전송합니다.
-func (s *Server) sendResultToDiscord(result controller.TaskResult) {
+func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 	if result.ThreadID == "" {
 		s.logger.Warn("Thread ID is empty, cannot send result",
 			zap.String("task_id", result.TaskID),
