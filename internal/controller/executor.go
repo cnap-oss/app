@@ -343,12 +343,13 @@ func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID
 		})
 	}
 
-	// RunRequest 구성
+	// RunRequest 구성 - 콜백 포함
 	req := &taskrunner.RunRequest{
 		TaskID:       taskID,
 		Model:        agent.Model,
 		SystemPrompt: agent.Prompt,
 		Messages:     chatMessages,
+		Callback:     c, // Controller가 StatusCallback 구현
 	}
 
 	// TaskRunner 실행

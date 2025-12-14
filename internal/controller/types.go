@@ -28,9 +28,15 @@ type ConnectorEvent struct {
 type ControllerEvent struct {
 	TaskID   string
 	ThreadID string
-	Status   string // "completed", "failed"
-	Content  string
-	Error    error
+	// Status는 이벤트 상태를 나타냅니다.
+	// 지원 값:
+	//   - "message": 중간 응답 (Runner가 생성한 응답, 실시간 전달용)
+	//   - "completed": Task 완료
+	//   - "failed": Task 실패
+	//   - "canceled": Task 취소
+	Status  string
+	Content string
+	Error   error
 }
 
 // AgentInfo는 에이전트 정보를 나타냅니다.

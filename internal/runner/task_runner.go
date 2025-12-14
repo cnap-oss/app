@@ -1,6 +1,10 @@
 package taskrunner
 
-import "context"
+import (
+	"context"
+
+	"go.uber.org/zap"
+)
 
 // TaskRunner는 Task 실행을 위한 인터페이스입니다.
 type TaskRunner interface {
@@ -14,6 +18,7 @@ type RunRequest struct {
 	Model        string
 	SystemPrompt string
 	Messages     []ChatMessage
+	Callback     StatusCallback // 중간 응답 콜백 (optional)
 }
 
 // ensure Runner implements TaskRunner interface
@@ -43,7 +48,21 @@ func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
 	// API 호출
 	result, err := r.RunWithResult(ctx, req.Model, req.TaskID, prompt)
 	if err != nil {
+		// 콜백이 있으면 에러 알림
+		if req.Callback != nil {
+			_ = req.Callback.OnError(req.TaskID, err)
+		}
 		return nil, err
+	}
+
+	// AI 응답 수신 완료 - 콜백으로 중간 응답 전달
+	if req.Callback != nil && result.Success && result.Output != "" {
+		if err := req.Callback.OnMessage(req.TaskID, result.Output); err != nil {
+			r.logger.Warn("Failed to send message callback",
+				zap.String("task_id", req.TaskID),
+				zap.Error(err),
+			)
+		}
 	}
 
 	return result, nil
