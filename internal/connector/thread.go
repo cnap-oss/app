@@ -111,9 +111,34 @@ func (s *Server) callAgentInThread(m *discordgo.Message, agent *controller.Agent
 			_, _ = s.session.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ 메시지 추가 실패: %v", err))
 			return
 		}
+
+		// "처리 중" 메시지 전송
+		embed := &discordgo.MessageEmbed{
+			Author:      &discordgo.MessageEmbedAuthor{Name: m.Author.Username, IconURL: m.Author.AvatarURL("")},
+			Description: m.Content,
+			Color:       0x0099ff, // Blue
+			Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("'%s'가 처리 중입니다...", agent.Name)},
+		}
+		if _, err := s.session.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			s.logger.Error("Failed to send processing message", zap.Error(err))
+		}
+
+		// continue 이벤트 전송 (기존 Task 실행 계속)
+		s.connectorEventChan <- controller.ConnectorEvent{
+			Type:     "continue",
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Prompt:   m.Content,
+		}
+
+		s.logger.Info("Task continue event sent",
+			zap.String("task_id", taskID),
+			zap.String("agent", agent.Name),
+		)
+		return
 	}
 
-	// "처리 중" 메시지 전송
+	// "처리 중" 메시지 전송 (새 Task 생성 시)
 	embed := &discordgo.MessageEmbed{
 		Author:      &discordgo.MessageEmbedAuthor{Name: m.Author.Username, IconURL: m.Author.AvatarURL("")},
 		Description: m.Content,
@@ -124,7 +149,7 @@ func (s *Server) callAgentInThread(m *discordgo.Message, agent *controller.Agent
 		s.logger.Error("Failed to send processing message", zap.Error(err))
 	}
 
-	// Task 실행 이벤트 전송 (비동기, 논블로킹)
+	// Task 실행 이벤트 전송 (새 Task, 비동기, 논블로킹)
 	s.connectorEventChan <- controller.ConnectorEvent{
 		Type:     "execute",
 		TaskID:   taskID,
