@@ -39,6 +39,30 @@ func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 		return
 	}
 
+	// message 상태는 중간 응답이므로 간단한 메시지로 처리
+	if result.Status == "message" {
+		content := result.Content
+		if len(content) > 2000 {
+			content = content[:2000] + "...\n(메시지가 너무 길어 잘렸습니다)"
+		}
+
+		// 일반 메시지로 전송 (Embed 없이)
+		_, err := s.session.ChannelMessageSend(result.ThreadID, content)
+		if err != nil {
+			s.logger.Error("Failed to send message to Discord",
+				zap.String("task_id", result.TaskID),
+				zap.String("thread_id", result.ThreadID),
+				zap.Error(err),
+			)
+		} else {
+			s.logger.Debug("Message sent to Discord",
+				zap.String("task_id", result.TaskID),
+				zap.String("thread_id", result.ThreadID),
+			)
+		}
+		return
+	}
+
 	// Embed 메시지 생성
 	var embed *discordgo.MessageEmbed
 

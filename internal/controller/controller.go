@@ -108,6 +108,26 @@ func (c *Controller) OnComplete(taskID string, result *taskrunner.RunResult) err
 	return c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusCompleted)
 }
 
+// OnMessage는 Runner가 중간 응답을 생성할 때 호출됩니다.
+// 이를 통해 Connector에 실시간으로 메시지를 전달합니다.
+func (c *Controller) OnMessage(taskID string, message string) error {
+	c.logger.Debug("OnMessage callback",
+		zap.String("task_id", taskID),
+		zap.Int("message_length", len(message)),
+	)
+
+	// ControllerEvent로 메시지 전달
+	// 현재는 TaskID를 ThreadID로도 사용 (추후 별도 매핑 필요 시 수정)
+	c.controllerEventChan <- ControllerEvent{
+		TaskID:   taskID,
+		ThreadID: taskID, // Task ID = Thread ID
+		Status:   "message",
+		Content:  message,
+	}
+
+	return nil
+}
+
 // OnError는 Task 실행 중 에러가 발생할 때 호출됩니다.
 func (c *Controller) OnError(taskID string, err error) error {
 	c.logger.Error("OnError callback",

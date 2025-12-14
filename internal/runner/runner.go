@@ -27,6 +27,10 @@ type StatusCallback interface {
 	// OnStatusChange는 Task 상태가 변경될 때 호출됩니다.
 	OnStatusChange(taskID string, status string) error
 
+	// OnMessage는 Runner가 중간 응답을 생성할 때 호출됩니다.
+	// 이를 통해 Controller가 Connector에 실시간으로 메시지를 전달할 수 있습니다.
+	OnMessage(taskID string, message string) error
+
 	// OnComplete는 Task가 완료될 때 호출됩니다.
 	OnComplete(taskID string, result *RunResult) error
 
