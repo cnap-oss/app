@@ -37,6 +37,8 @@ func (c *Controller) handleConnectorEvent(ctx context.Context, event ConnectorEv
 	switch event.Type {
 	case "execute":
 		c.handleExecuteEvent(ctx, event)
+	case "continue":
+		c.handleContinueEvent(ctx, event)
 	case "cancel":
 		c.handleCancelEvent(ctx, event)
 	default:
@@ -82,6 +84,67 @@ func (c *Controller) handleExecuteEvent(ctx context.Context, event ConnectorEven
 
 	// Task 실행 (별도 함수로 분리하여 결과 처리)
 	c.executeTaskWithResult(ctx, event.TaskID, event.ThreadID, task)
+}
+
+// handleContinueEvent는 기존 Task에 메시지 추가 후 실행 계속 이벤트를 처리합니다.
+// Thread 후속 메시지로 인해 기존 Task를 계속 실행해야 할 때 사용됩니다.
+func (c *Controller) handleContinueEvent(ctx context.Context, event ConnectorEvent) {
+	taskID := event.TaskID
+	threadID := event.ThreadID
+
+	c.logger.Info("Handling continue event",
+		zap.String("task_id", taskID),
+		zap.String("thread_id", threadID),
+	)
+
+	// 1. Task 조회
+	task, err := c.repo.GetTask(ctx, taskID)
+	if err != nil {
+		c.logger.Error("Failed to get task for continue",
+			zap.String("task_id", taskID),
+			zap.Error(err),
+		)
+		c.controllerEventChan <- ControllerEvent{
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Status:   "failed",
+			Error:    fmt.Errorf("task not found: %w", err),
+		}
+		return
+	}
+
+	// 2. Task 상태 확인 (이미 실행 중이면 에러)
+	if task.Status == storage.TaskStatusRunning {
+		c.logger.Warn("Task already running, cannot continue",
+			zap.String("task_id", taskID),
+			zap.String("status", task.Status),
+		)
+		c.controllerEventChan <- ControllerEvent{
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Status:   "failed",
+			Error:    fmt.Errorf("task already running"),
+		}
+		return
+	}
+
+	// 3. 상태를 running으로 변경
+	if err := c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusRunning); err != nil {
+		c.logger.Error("Failed to update task status to running",
+			zap.String("task_id", taskID),
+			zap.Error(err),
+		)
+		c.controllerEventChan <- ControllerEvent{
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Status:   "failed",
+			Error:    fmt.Errorf("failed to update status: %w", err),
+		}
+		return
+	}
+
+	// 4. Task 실행 (메시지 히스토리 포함) - executeTaskWithResult 재사용
+	c.executeTaskWithResult(ctx, taskID, threadID, task)
 }
 
 // handleCancelEvent는 Task 취소 이벤트를 처리합니다.

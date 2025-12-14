@@ -13,7 +13,12 @@ type TaskContext struct {
 
 // ConnectorEvent는 Connector에서 Controller로 전송되는 이벤트를 나타냅니다.
 type ConnectorEvent struct {
-	Type     string // "execute", "cancel"
+	// Type은 이벤트 유형을 나타냅니다.
+	// 지원 타입:
+	//   - "execute": Task 실행 시작 (새 Task 또는 처음 실행)
+	//   - "cancel": Task 취소
+	//   - "continue": 기존 Task에 메시지 추가 후 실행 계속 (멀티턴 대화)
+	Type     string
 	TaskID   string
 	ThreadID string // Discord thread ID
 	Prompt   string // 사용자 메시지 (optional)
