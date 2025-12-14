@@ -15,9 +15,9 @@ func (c *Controller) eventLoop(ctx context.Context) {
 
 	for {
 		select {
-		case event := <-c.taskEventChan:
+		case event := <-c.connectorEventChan:
 			// 각 이벤트를 별도 goroutine으로 처리 (병렬 처리)
-			go c.handleTaskEvent(ctx, event)
+			go c.handleConnectorEvent(ctx, event)
 
 		case <-ctx.Done():
 			c.logger.Info("Event loop shutting down")
@@ -26,9 +26,9 @@ func (c *Controller) eventLoop(ctx context.Context) {
 	}
 }
 
-// handleTaskEvent는 단일 Task 이벤트를 처리합니다.
-func (c *Controller) handleTaskEvent(ctx context.Context, event TaskEvent) {
-	c.logger.Info("Handling task event",
+// handleConnectorEvent는 단일 Connector 이벤트를 처리합니다.
+func (c *Controller) handleConnectorEvent(ctx context.Context, event ConnectorEvent) {
+	c.logger.Info("Handling connector event",
 		zap.String("type", event.Type),
 		zap.String("task_id", event.TaskID),
 		zap.String("thread_id", event.ThreadID),
@@ -48,7 +48,7 @@ func (c *Controller) handleTaskEvent(ctx context.Context, event TaskEvent) {
 }
 
 // handleExecuteEvent는 Task 실행 이벤트를 처리합니다.
-func (c *Controller) handleExecuteEvent(ctx context.Context, event TaskEvent) {
+func (c *Controller) handleExecuteEvent(ctx context.Context, event ConnectorEvent) {
 	// Task 조회
 	task, err := c.repo.GetTask(ctx, event.TaskID)
 	if err != nil {
@@ -56,7 +56,7 @@ func (c *Controller) handleExecuteEvent(ctx context.Context, event TaskEvent) {
 			zap.String("task_id", event.TaskID),
 			zap.Error(err),
 		)
-		c.taskResultChan <- TaskResult{
+		c.controllerEventChan <- ControllerEvent{
 			TaskID:   event.TaskID,
 			ThreadID: event.ThreadID,
 			Status:   "failed",
@@ -71,7 +71,7 @@ func (c *Controller) handleExecuteEvent(ctx context.Context, event TaskEvent) {
 			zap.String("task_id", event.TaskID),
 			zap.Error(err),
 		)
-		c.taskResultChan <- TaskResult{
+		c.controllerEventChan <- ControllerEvent{
 			TaskID:   event.TaskID,
 			ThreadID: event.ThreadID,
 			Status:   "failed",
@@ -85,7 +85,7 @@ func (c *Controller) handleExecuteEvent(ctx context.Context, event TaskEvent) {
 }
 
 // handleCancelEvent는 Task 취소 이벤트를 처리합니다.
-func (c *Controller) handleCancelEvent(ctx context.Context, event TaskEvent) {
+func (c *Controller) handleCancelEvent(ctx context.Context, event ConnectorEvent) {
 	c.logger.Info("Canceling task",
 		zap.String("task_id", event.TaskID),
 	)
@@ -99,7 +99,7 @@ func (c *Controller) handleCancelEvent(ctx context.Context, event TaskEvent) {
 		c.logger.Warn("Task context not found for cancellation",
 			zap.String("task_id", event.TaskID),
 		)
-		c.taskResultChan <- TaskResult{
+		c.controllerEventChan <- ControllerEvent{
 			TaskID:   event.TaskID,
 			ThreadID: event.ThreadID,
 			Status:   "failed",
@@ -111,7 +111,7 @@ func (c *Controller) handleCancelEvent(ctx context.Context, event TaskEvent) {
 	// Context 취소
 	taskCtx.cancel()
 
-	c.taskResultChan <- TaskResult{
+	c.controllerEventChan <- ControllerEvent{
 		TaskID:   event.TaskID,
 		ThreadID: event.ThreadID,
 		Status:   "canceled",

@@ -116,12 +116,12 @@ func runStart(logger *zap.Logger) error {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// 이벤트 채널 생성 (버퍼 크기: 100)
-	taskEventChan := make(chan controller.TaskEvent, 100)
-	taskResultChan := make(chan controller.TaskResult, 100)
+	connectorEventChan := make(chan controller.ConnectorEvent, 100)
+	controllerEventChan := make(chan controller.ControllerEvent, 100)
 
 	// 서버 인스턴스 생성
-	controllerServer := controller.NewController(logger.Named("controller"), repo, taskEventChan, taskResultChan)
-	connectorServer := connector.NewServer(logger.Named("connector"), controllerServer, taskEventChan, taskResultChan)
+	controllerServer := controller.NewController(logger.Named("controller"), repo, connectorEventChan, controllerEventChan)
+	connectorServer := connector.NewServer(logger.Named("connector"), controllerServer, connectorEventChan, controllerEventChan)
 
 	// 에러 채널
 	errChan := make(chan error, 2)
@@ -225,9 +225,9 @@ func newController(logger *zap.Logger) (*controller.Controller, func(), error) {
 	}
 
 	// CLI 단일 실행용으로 채널 생성 (버퍼 크기: 10)
-	taskEventChan := make(chan controller.TaskEvent, 10)
-	taskResultChan := make(chan controller.TaskResult, 10)
+	connectorEventChan := make(chan controller.ConnectorEvent, 10)
+	controllerEventChan := make(chan controller.ControllerEvent, 10)
 
-	ctrl := controller.NewController(logger.Named("controller"), repo, taskEventChan, taskResultChan)
+	ctrl := controller.NewController(logger.Named("controller"), repo, connectorEventChan, controllerEventChan)
 	return ctrl, cleanup, nil
 }

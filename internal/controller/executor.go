@@ -251,7 +251,7 @@ func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID
 			)
 			_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusFailed)
 
-			c.taskResultChan <- TaskResult{
+			c.controllerEventChan <- ControllerEvent{
 				TaskID:   taskID,
 				ThreadID: threadID,
 				Status:   "failed",
@@ -277,7 +277,7 @@ func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID
 		c.logger.Error("Failed to get agent info", zap.Error(err))
 		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
 
-		c.taskResultChan <- TaskResult{
+		c.controllerEventChan <- ControllerEvent{
 			TaskID:   taskID,
 			ThreadID: threadID,
 			Status:   "failed",
@@ -308,7 +308,7 @@ func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID
 		c.logger.Error("Failed to list messages", zap.Error(err))
 		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
 
-		c.taskResultChan <- TaskResult{
+		c.controllerEventChan <- ControllerEvent{
 			TaskID:   taskID,
 			ThreadID: threadID,
 			Status:   "failed",
@@ -367,7 +367,7 @@ func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID
 		}
 		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, status)
 
-		c.taskResultChan <- TaskResult{
+		c.controllerEventChan <- ControllerEvent{
 			TaskID:   taskID,
 			ThreadID: threadID,
 			Status:   status,
@@ -386,7 +386,7 @@ func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID
 		)
 		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusFailed)
 
-		c.taskResultChan <- TaskResult{
+		c.controllerEventChan <- ControllerEvent{
 			TaskID:   taskID,
 			ThreadID: threadID,
 			Status:   "failed",
@@ -413,7 +413,7 @@ func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID
 
 		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusCompleted)
 
-		c.taskResultChan <- TaskResult{
+		c.controllerEventChan <- ControllerEvent{
 			TaskID:   taskID,
 			ThreadID: threadID,
 			Status:   "completed",

@@ -11,16 +11,16 @@ type TaskContext struct {
 	cancel context.CancelFunc
 }
 
-// TaskEvent는 Task 실행 이벤트를 나타냅니다.
-type TaskEvent struct {
+// ConnectorEvent는 Connector에서 Controller로 전송되는 이벤트를 나타냅니다.
+type ConnectorEvent struct {
 	Type     string // "execute", "cancel"
 	TaskID   string
 	ThreadID string // Discord thread ID
 	Prompt   string // 사용자 메시지 (optional)
 }
 
-// TaskResult는 Task 실행 결과를 나타냅니다.
-type TaskResult struct {
+// ControllerEvent는 Controller에서 Connector로 전송되는 이벤트(결과)를 나타냅니다.
+type ControllerEvent struct {
 	TaskID   string
 	ThreadID string
 	Status   string // "completed", "failed"

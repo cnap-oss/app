@@ -18,19 +18,19 @@ type Controller struct {
 	runnerManager  *taskrunner.RunnerManager
 	taskContexts   map[string]*TaskContext
 	mu             sync.RWMutex
-	taskEventChan  chan TaskEvent
-	taskResultChan chan TaskResult
+	connectorEventChan  chan ConnectorEvent
+	controllerEventChan chan ControllerEvent
 }
 
 // NewController는 새로운 Controller를 생성합니다.
-func NewController(logger *zap.Logger, repo *storage.Repository, eventChan chan TaskEvent, resultChan chan TaskResult) *Controller {
+func NewController(logger *zap.Logger, repo *storage.Repository, eventChan chan ConnectorEvent, resultChan chan ControllerEvent) *Controller {
 	return &Controller{
-		logger:         logger,
-		repo:           repo,
-		runnerManager:  taskrunner.GetRunnerManager(),
-		taskContexts:   make(map[string]*TaskContext),
-		taskEventChan:  eventChan,
-		taskResultChan: resultChan,
+		logger:              logger,
+		repo:                repo,
+		runnerManager:       taskrunner.GetRunnerManager(),
+		taskContexts:        make(map[string]*TaskContext),
+		connectorEventChan:  eventChan,
+		controllerEventChan: resultChan,
 	}
 }
 

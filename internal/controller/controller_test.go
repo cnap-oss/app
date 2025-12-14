@@ -30,10 +30,10 @@ func newTestController(t *testing.T) (*controller.Controller, func()) {
 	require.NoError(t, err)
 
 	// 테스트용 채널 생성 (버퍼 크기: 10)
-	taskEventChan := make(chan controller.TaskEvent, 10)
-	taskResultChan := make(chan controller.TaskResult, 10)
+	connectorEventChan := make(chan controller.ConnectorEvent, 10)
+	controllerEventChan := make(chan controller.ControllerEvent, 10)
 
-	ctrl := controller.NewController(zaptest.NewLogger(t), repo, taskEventChan, taskResultChan)
+	ctrl := controller.NewController(zaptest.NewLogger(t), repo, connectorEventChan, controllerEventChan)
 
 	cleanup := func() {
 		_ = os.Unsetenv("OPEN_CODE_API_KEY")
