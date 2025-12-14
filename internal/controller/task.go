@@ -185,7 +185,7 @@ func (c *Controller) ListTasksByAgent(ctx context.Context, agentID string) ([]st
 	return tasks, nil
 }
 
-// DeleteTask는 작업을 삭제합니다 (hard delete).
+// DeleteTask는 작업을 삭제합니다 (soft delete).
 func (c *Controller) DeleteTask(ctx context.Context, taskID string) error {
 	c.logger.Info("Deleting task",
 		zap.String("task_id", taskID),
