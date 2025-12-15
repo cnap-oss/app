@@ -744,6 +744,11 @@ func (r *Runner) convertEventToMessage(event *Event, sessionID string) *RunnerMe
 		RawEvent:  event,
 	}
 
+	r.logger.Info("opencode message received",
+		zap.String("event_type", event.Type),
+		zap.Any("properties", event.Properties),
+	)
+
 	switch event.Type {
 	case "message.part.updated":
 		// 파트 정보 추출
