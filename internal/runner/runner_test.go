@@ -67,7 +67,8 @@ func TestRunWithResult_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
+	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	result, err := runner.Request(ctx, "grok-code", "test-task", []ChatMessage{
@@ -105,7 +106,8 @@ func TestRunWithResult_APIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
+	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	result, err := runner.Request(ctx, "grok-code", "test-task", []ChatMessage{
@@ -130,7 +132,8 @@ func TestRunWithResult_HTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
+	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	result, err := runner.Request(ctx, "grok-code", "test-task", []ChatMessage{
@@ -156,7 +159,8 @@ func TestRunWithResult_Timeout(t *testing.T) {
 
 	// Create client with very short timeout
 	client := &http.Client{Timeout: 100 * time.Millisecond}
-	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL), WithHTTPClient(client))
+	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL), WithHTTPClient(client))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	result, err := runner.Request(ctx, "grok-code", "test-task", []ChatMessage{
@@ -179,7 +183,8 @@ func TestRunWithResult_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
+	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	require.NoError(t, err)
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -233,7 +238,8 @@ func TestRun_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
+	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	req := &RunRequest{
@@ -302,7 +308,8 @@ func TestRun_WithSystemPrompt(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
+	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	req := &RunRequest{
@@ -314,7 +321,7 @@ func TestRun_WithSystemPrompt(t *testing.T) {
 		},
 	}
 
-	_, err := runner.Run(ctx, req)
+	_, err = runner.Run(ctx, req)
 	require.NoError(t, err)
 
 	// Verify system prompt was included in the messages
@@ -364,7 +371,8 @@ func TestRun_NoUserMessage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
+	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	req := &RunRequest{
@@ -400,12 +408,15 @@ func TestNewRunner_WithOptions(t *testing.T) {
 	customClient := &http.Client{Timeout: 5 * time.Second}
 	customBaseURL := "https://custom.api.example.com"
 
-	runner := NewRunner(
+	runner, err := NewRunner(
+		"test-task",
+		AgentInfo{AgentID: "test-agent", Model: "grok-code"},
 		zaptest.NewLogger(t),
 		WithHTTPClient(customClient),
 		WithBaseURL(customBaseURL),
 	)
 
+	require.NoError(t, err)
 	assert.NotNil(t, runner)
 	assert.Equal(t, customClient, runner.httpClient)
 	assert.Equal(t, customBaseURL, runner.baseURL)

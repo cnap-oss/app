@@ -24,7 +24,15 @@ func TestRunner_RealAPI(t *testing.T) {
 		t.Skip("OPEN_CODE_API_KEY not set; skipping real API call")
 	}
 
-	runner := NewRunner(zap.NewExample())
+	runner, err := NewRunner(
+		"integration-test",
+		AgentInfo{
+			AgentID: "test-agent",
+			Model:   "grok-code",
+		},
+		zap.NewExample(),
+	)
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
