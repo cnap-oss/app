@@ -41,6 +41,8 @@ func (c *Controller) handleConnectorEvent(ctx context.Context, event ConnectorEv
 		c.handleContinueEvent(ctx, event)
 	case "cancel":
 		c.handleCancelEvent(ctx, event)
+	case "complete":
+		c.handleCompleteEvent(ctx, event)
 	default:
 		c.logger.Warn("Unknown event type",
 			zap.String("type", event.Type),
@@ -180,4 +182,61 @@ func (c *Controller) handleCancelEvent(ctx context.Context, event ConnectorEvent
 		Status:   "canceled",
 		Content:  "Task canceled by user",
 	}
+}
+
+// handleCompleteEvent handles the explicit task completion event.
+func (c *Controller) handleCompleteEvent(ctx context.Context, event ConnectorEvent) {
+	taskID := event.TaskID
+	threadID := event.ThreadID
+
+	c.logger.Info("Handling complete event",
+		zap.String("task_id", taskID),
+		zap.String("thread_id", threadID),
+	)
+
+	// 1. Task 조회
+	task, err := c.repo.GetTask(ctx, taskID)
+	if err != nil {
+		c.logger.Error("Failed to get task for complete event",
+			zap.String("task_id", taskID),
+			zap.Error(err),
+		)
+		c.controllerEventChan <- ControllerEvent{
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Status:   "failed",
+			Error:    fmt.Errorf("task not found: %w", err),
+		}
+		return
+	}
+
+	// 2. Task 상태를 completed로 변경
+	if err := c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusCompleted); err != nil {
+		c.logger.Error("Failed to update task status to completed",
+			zap.String("task_id", taskID),
+			zap.Error(err),
+		)
+		c.controllerEventChan <- ControllerEvent{
+			TaskID:   taskID,
+			ThreadID: threadID,
+			Status:   "failed",
+			Error:    fmt.Errorf("failed to update status: %w", err),
+		}
+		return
+	}
+
+	// 3. Runner 삭제 (명시적 완료 시에만)
+	c.runnerManager.DeleteRunner(taskID)
+
+	// 4. completed 이벤트 전송
+	c.controllerEventChan <- ControllerEvent{
+		TaskID:   taskID,
+		ThreadID: threadID,
+		Status:   "completed",
+		Content:  "Task completed successfully",
+	}
+
+	c.logger.Info("Task completed explicitly",
+		zap.String("task_id", taskID),
+	)
 }

@@ -18,6 +18,7 @@ type ConnectorEvent struct {
 	//   - "execute": Task 실행 시작 (새 Task 또는 처음 실행)
 	//   - "cancel": Task 취소
 	//   - "continue": 기존 Task에 메시지 추가 후 실행 계속 (멀티턴 대화)
+	//   - "complete": Task 명시적 완료
 	Type     string
 	TaskID   string
 	ThreadID string // Discord thread ID
