@@ -17,6 +17,7 @@ import (
 // OpenCodeClient는 OpenCode Server REST API 클라이언트입니다.
 type OpenCodeClient struct {
 	baseURL    string
+	directory  string // OpenCode 작업 디렉토리
 	httpClient *http.Client
 	logger     *zap.Logger
 }
@@ -38,12 +39,19 @@ func WithOpenCodeLogger(logger *zap.Logger) OpenCodeClientOption {
 	}
 }
 
+// WithOpenCodeDirectory는 OpenCode 작업 디렉토리를 설정합니다.
+func WithOpenCodeDirectory(directory string) OpenCodeClientOption {
+	return func(c *OpenCodeClient) {
+		c.directory = directory
+	}
+}
+
 // NewOpenCodeClient는 새 OpenCode API 클라이언트를 생성합니다.
 func NewOpenCodeClient(baseURL string, opts ...OpenCodeClientOption) *OpenCodeClient {
 	c := &OpenCodeClient{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: 300 * time.Second, // OpenCode는 긴 처리 시간이 필요할 수 있음
 		},
 		logger: zap.NewNop(),
 	}
@@ -53,26 +61,6 @@ func NewOpenCodeClient(baseURL string, opts ...OpenCodeClientOption) *OpenCodeCl
 	}
 
 	return c
-}
-
-// ======================================
-// Health Check
-// ======================================
-
-// Health는 서버 상태를 확인합니다.
-func (c *OpenCodeClient) Health(ctx context.Context) (*HealthResponse, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/health", nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result HealthResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
-	}
-
-	return &result, nil
 }
 
 // ======================================
@@ -92,12 +80,33 @@ func (c *OpenCodeClient) CreateSession(ctx context.Context, req *CreateSessionRe
 		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
 	}
 
+	c.logger.Info("세션 생성됨",
+		zap.String("session_id", result.ID),
+		zap.String("title", result.Title),
+	)
+
 	return &result, nil
 }
 
 // GetSession은 세션 정보를 조회합니다.
 func (c *OpenCodeClient) GetSession(ctx context.Context, sessionID string) (*Session, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/session/"+sessionID, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result Session
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
+	}
+
+	return &result, nil
+}
+
+// UpdateSession은 세션을 업데이트합니다.
+func (c *OpenCodeClient) UpdateSession(ctx context.Context, sessionID string, req *UpdateSessionRequest) (*Session, error) {
+	resp, err := c.doRequest(ctx, http.MethodPatch, "/session/"+sessionID, req)
 	if err != nil {
 		return nil, err
 	}
@@ -119,82 +128,209 @@ func (c *OpenCodeClient) DeleteSession(ctx context.Context, sessionID string) er
 	}
 	defer resp.Body.Close()
 
+	c.logger.Info("세션 삭제됨",
+		zap.String("session_id", sessionID),
+	)
+
 	return nil
 }
 
-// ======================================
-// Chat API
-// ======================================
-
-// Chat은 메시지를 전송하고 응답을 수신합니다.
-func (c *OpenCodeClient) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	// 1. 세션 생성
-	session, err := c.CreateSession(ctx, &CreateSessionRequest{})
-	if err != nil {
-		return nil, fmt.Errorf("세션 생성 실패: %w", err)
-	}
-
-	// 2. 메시지 전송
-	messageReq := map[string]interface{}{
-		"model": map[string]string{
-			"providerID": "opencode", // 기본 provider
-			"modelID":    req.Model,
-		},
-		"parts": []map[string]interface{}{},
-	}
-
-	// 메시지 변환
-	for _, msg := range req.Messages {
-		part := map[string]interface{}{
-			"type": "text",
-			"text": msg.Content,
-		}
-		messageReq["parts"] = append(messageReq["parts"].([]map[string]interface{}), part)
-	}
-
-	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/session/%s/message", session.ID), messageReq)
+// ListSessions는 모든 세션 목록을 조회합니다.
+func (c *OpenCodeClient) ListSessions(ctx context.Context) ([]Session, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/session", nil)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	// 응답 파싱
-	var messageResp map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&messageResp); err != nil {
+	var result []Session
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
 	}
 
-	// parts에서 텍스트 추출
-	var content string
-	if parts, ok := messageResp["parts"].([]interface{}); ok {
-		for _, part := range parts {
-			if partMap, ok := part.(map[string]interface{}); ok {
-				if partType, ok := partMap["type"].(string); ok && partType == "text" {
-					if text, ok := partMap["text"].(string); ok {
-						content += text
-					}
-				}
-			}
-		}
-	}
-
-	return &ChatResponse{
-		Model: req.Model,
-		Response: ChatMessage{
-			Role:    "assistant",
-			Content: content,
-		},
-	}, nil
+	return result, nil
 }
 
-// ChatStreamHandler는 스트리밍 이벤트 핸들러입니다.
-type ChatStreamHandler func(event *ChatStreamEvent) error
+// ======================================
+// Message API
+// ======================================
 
-// ChatStream은 스트리밍 모드로 메시지를 전송합니다.
-func (c *OpenCodeClient) ChatStream(ctx context.Context, req *ChatRequest, handler ChatStreamHandler) error {
-	req.Stream = true
+// Prompt는 메시지를 전송하고 응답을 수신합니다.
+func (c *OpenCodeClient) Prompt(ctx context.Context, sessionID string, req *PromptRequest) (*PromptResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/session/%s/message", sessionID), req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-	httpReq, err := c.buildRequest(ctx, http.MethodPost, "/api/chat/stream", req)
+	var result PromptResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
+	}
+
+	c.logger.Info("메시지 전송 완료",
+		zap.String("session_id", sessionID),
+		zap.String("message_id", result.Info.ID),
+		zap.Int("parts_count", len(result.Parts)),
+	)
+
+	return &result, nil
+}
+
+// GetMessages는 세션의 모든 메시지를 조회합니다.
+func (c *OpenCodeClient) GetMessages(ctx context.Context, sessionID string, limit *int) ([]struct {
+	Info  Message `json:"info"`
+	Parts []Part  `json:"parts"`
+}, error) {
+	path := fmt.Sprintf("/session/%s/message", sessionID)
+	if limit != nil {
+		path = fmt.Sprintf("%s?limit=%d", path, *limit)
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result []struct {
+		Info  json.RawMessage `json:"info"`
+		Parts []Part          `json:"parts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
+	}
+
+	// Message는 UserMessage 또는 AssistantMessage일 수 있으므로 변환
+	messages := make([]struct {
+		Info  Message `json:"info"`
+		Parts []Part  `json:"parts"`
+	}, len(result))
+
+	for i, msg := range result {
+		// role 필드로 타입 구분
+		var roleCheck struct {
+			Role string `json:"role"`
+		}
+		if err := json.Unmarshal(msg.Info, &roleCheck); err != nil {
+			return nil, fmt.Errorf("role 파싱 실패: %w", err)
+		}
+
+		if roleCheck.Role == "user" {
+			var userMsg UserMessage
+			if err := json.Unmarshal(msg.Info, &userMsg); err != nil {
+				return nil, fmt.Errorf("user message 파싱 실패: %w", err)
+			}
+			messages[i].Info = userMsg
+		} else {
+			var assistantMsg AssistantMessage
+			if err := json.Unmarshal(msg.Info, &assistantMsg); err != nil {
+				return nil, fmt.Errorf("assistant message 파싱 실패: %w", err)
+			}
+			messages[i].Info = assistantMsg
+		}
+		messages[i].Parts = msg.Parts
+	}
+
+	return messages, nil
+}
+
+// GetMessage는 특정 메시지를 조회합니다.
+func (c *OpenCodeClient) GetMessage(ctx context.Context, sessionID, messageID string) (*struct {
+	Info  Message `json:"info"`
+	Parts []Part  `json:"parts"`
+}, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/session/%s/message/%s", sessionID, messageID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var rawResult struct {
+		Info  json.RawMessage `json:"info"`
+		Parts []Part          `json:"parts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rawResult); err != nil {
+		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
+	}
+
+	result := &struct {
+		Info  Message `json:"info"`
+		Parts []Part  `json:"parts"`
+	}{
+		Parts: rawResult.Parts,
+	}
+
+	// role 필드로 타입 구분
+	var roleCheck struct {
+		Role string `json:"role"`
+	}
+	if err := json.Unmarshal(rawResult.Info, &roleCheck); err != nil {
+		return nil, fmt.Errorf("role 파싱 실패: %w", err)
+	}
+
+	if roleCheck.Role == "user" {
+		var userMsg UserMessage
+		if err := json.Unmarshal(rawResult.Info, &userMsg); err != nil {
+			return nil, fmt.Errorf("user message 파싱 실패: %w", err)
+		}
+		result.Info = userMsg
+	} else {
+		var assistantMsg AssistantMessage
+		if err := json.Unmarshal(rawResult.Info, &assistantMsg); err != nil {
+			return nil, fmt.Errorf("assistant message 파싱 실패: %w", err)
+		}
+		result.Info = assistantMsg
+	}
+
+	return result, nil
+}
+
+// AbortSession은 활성 세션을 중단합니다.
+func (c *OpenCodeClient) AbortSession(ctx context.Context, sessionID string) error {
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/session/%s/abort", sessionID), nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	c.logger.Info("세션 중단됨",
+		zap.String("session_id", sessionID),
+	)
+
+	return nil
+}
+
+// ======================================
+// Path API
+// ======================================
+
+// GetPath는 경로 정보를 조회합니다.
+func (c *OpenCodeClient) GetPath(ctx context.Context) (*PathInfo, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/path", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result PathInfo
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
+	}
+
+	return &result, nil
+}
+
+// ======================================
+// Event Streaming
+// ======================================
+
+// EventHandler는 SSE 이벤트 핸들러입니다.
+type EventHandler func(event *Event) error
+
+// SubscribeEvents는 이벤트 스트림을 구독합니다.
+func (c *OpenCodeClient) SubscribeEvents(ctx context.Context, handler EventHandler) error {
+	httpReq, err := c.buildRequest(ctx, http.MethodGet, "/event", nil)
 	if err != nil {
 		return err
 	}
@@ -210,11 +346,14 @@ func (c *OpenCodeClient) ChatStream(ctx context.Context, req *ChatRequest, handl
 		return c.handleErrorResponse(resp)
 	}
 
+	c.logger.Info("이벤트 스트림 구독 시작")
+
 	// SSE 파싱
 	reader := bufio.NewReader(resp.Body)
 	for {
 		select {
 		case <-ctx.Done():
+			c.logger.Info("이벤트 스트림 구독 중단")
 			return ctx.Err()
 		default:
 		}
@@ -222,6 +361,7 @@ func (c *OpenCodeClient) ChatStream(ctx context.Context, req *ChatRequest, handl
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
+				c.logger.Info("이벤트 스트림 종료")
 				return nil
 			}
 			return fmt.Errorf("스트림 읽기 실패: %w", err)
@@ -234,13 +374,10 @@ func (c *OpenCodeClient) ChatStream(ctx context.Context, req *ChatRequest, handl
 
 		if strings.HasPrefix(line, "data: ") {
 			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				return nil
-			}
 
-			var event ChatStreamEvent
+			var event Event
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
-				c.logger.Warn("스트림 이벤트 파싱 실패",
+				c.logger.Warn("이벤트 파싱 실패",
 					zap.String("data", data),
 					zap.Error(err),
 				)
@@ -249,10 +386,6 @@ func (c *OpenCodeClient) ChatStream(ctx context.Context, req *ChatRequest, handl
 
 			if err := handler(&event); err != nil {
 				return err
-			}
-
-			if event.Event == "done" || event.Event == "error" {
-				return nil
 			}
 		}
 	}
@@ -286,6 +419,15 @@ func (c *OpenCodeClient) doRequest(ctx context.Context, method, path string, bod
 func (c *OpenCodeClient) buildRequest(ctx context.Context, method, path string, body interface{}) (*http.Request, error) {
 	url := c.baseURL + path
 
+	// directory 쿼리 파라미터 추가
+	if c.directory != "" {
+		if strings.Contains(url, "?") {
+			url += "&directory=" + c.directory
+		} else {
+			url += "?directory=" + c.directory
+		}
+	}
+
 	var bodyReader io.Reader
 	if body != nil {
 		bodyBytes, err := json.Marshal(body)
@@ -309,10 +451,36 @@ func (c *OpenCodeClient) buildRequest(ctx context.Context, method, path string, 
 func (c *OpenCodeClient) handleErrorResponse(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
 
-	var apiErr APIError
-	if err := json.Unmarshal(body, &apiErr); err == nil && apiErr.Error.Message != "" {
-		return fmt.Errorf("API 에러 [%d]: %s", resp.StatusCode, apiErr.String())
+	// BadRequestError (400) 시도
+	if resp.StatusCode == http.StatusBadRequest {
+		var badReqErr BadRequestError
+		if err := json.Unmarshal(body, &badReqErr); err == nil && len(badReqErr.Errors) > 0 {
+			return &APIError{
+				StatusCode: resp.StatusCode,
+				Message:    fmt.Sprintf("잘못된 요청: %v", badReqErr.Errors),
+				Body:       string(body),
+			}
+		}
 	}
 
-	return fmt.Errorf("HTTP 에러 [%d]: %s", resp.StatusCode, string(body))
+	// NotFoundError (404) 시도
+	if resp.StatusCode == http.StatusNotFound {
+		var notFoundErr NotFoundError
+		if err := json.Unmarshal(body, &notFoundErr); err == nil {
+			if msg, ok := notFoundErr.Data["message"].(string); ok {
+				return &APIError{
+					StatusCode: resp.StatusCode,
+					Message:    msg,
+					Body:       string(body),
+				}
+			}
+		}
+	}
+
+	// 일반 에러
+	return &APIError{
+		StatusCode: resp.StatusCode,
+		Message:    fmt.Sprintf("HTTP 에러 [%d]", resp.StatusCode),
+		Body:       string(body),
+	}
 }
