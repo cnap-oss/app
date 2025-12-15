@@ -17,8 +17,6 @@ import (
 
 // TestThreadTaskMapping은 Thread-Task 1:1 매핑을 테스트합니다.
 func TestThreadTaskMapping(t *testing.T) {
-	t.Setenv("OPEN_CODE_API_KEY", "test-key")
-
 	// Setup: in-memory DB
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
