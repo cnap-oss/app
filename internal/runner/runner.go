@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -186,6 +187,13 @@ func NewRunner(taskID string, agentInfo AgentInfo, logger *zap.Logger, opts ...R
 	if workspacePath == "" {
 		workspacePath = fmt.Sprintf("%s/%s", workspaceBaseDir, agentInfo.AgentID)
 	}
+
+	// 상대 경로를 절대 경로로 변환 (Docker 볼륨 마운트 요구사항)
+	absPath, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("작업 공간 절대 경로 변환 실패: %w", err)
+	}
+	workspacePath = absPath
 
 	r := &Runner{
 		ID:            taskID,
