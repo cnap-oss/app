@@ -514,8 +514,54 @@ func (r *Runner) runSync(ctx context.Context, client *OpenCodeClient, req *RunRe
 	}
 
 	// 5. 응답에서 텍스트 추출
+	// OpenCode Server는 비동기로 동작하므로 즉시 응답이 비어있을 수 있음
+	// 응답의 message ID를 사용하여 완료된 메시지를 폴링
+	messageID := resp.Info.ID
+	
+	// 메시지 완료 대기 (최대 60초)
+	var fullMessage *struct {
+		Info  Message `json:"info"`
+		Parts []Part  `json:"parts"`
+	}
+	
+	timeout := time.After(60 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("컨텍스트 취소됨: %w", ctx.Err())
+		case <-timeout:
+			return nil, fmt.Errorf("메시지 완료 대기 시간 초과")
+		case <-ticker.C:
+			msg, err := client.GetMessage(ctx, session.ID, messageID)
+			if err != nil {
+				r.logger.Warn("메시지 조회 실패",
+					zap.String("session_id", session.ID),
+					zap.String("message_id", messageID),
+					zap.Error(err),
+				)
+				continue
+			}
+
+			// AssistantMessage인 경우 완료 시간 확인
+			if assistantMsg, ok := msg.Info.(AssistantMessage); ok {
+				if assistantMsg.Time.Completed != nil {
+					fullMessage = msg
+					break
+				}
+			}
+		}
+		
+		if fullMessage != nil {
+			break
+		}
+	}
+
+	// 6. 완료된 메시지에서 텍스트 추출
 	var output strings.Builder
-	for _, part := range resp.Parts {
+	for _, part := range fullMessage.Parts {
 		if part.Type == "text" {
 			output.WriteString(part.Text)
 		}
