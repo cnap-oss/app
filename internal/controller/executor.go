@@ -193,6 +193,7 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 		Model:        agent.Model,
 		SystemPrompt: agent.Prompt,
 		Messages:     chatMessages,
+		Callback:     c,
 	}
 
 	// TaskRunner 실행 (callback이 상태 변경과 결과 저장 처리)
@@ -211,6 +212,12 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 		}
 		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, status)
 
+		c.controllerEventChan <- ControllerEvent{
+			TaskID: taskID,
+			Status: status,
+			Error:  ctx.Err(),
+		}
+
 		// 실행 완료 후 TaskRunner 정리
 		c.runnerManager.DeleteRunner(taskID)
 		return
@@ -222,201 +229,15 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 			zap.String("task_id", taskID),
 			zap.Error(err),
 		)
+		c.controllerEventChan <- ControllerEvent{
+			TaskID: taskID,
+			Status: "failed",
+			Error:  err,
+		}
 	} else {
 		c.logger.Info("Task execution completed",
 			zap.String("task_id", taskID),
 			zap.Bool("success", result != nil && result.Success),
 		)
 	}
-
-	// 실행 완료 후 TaskRunner 정리
-	c.runnerManager.DeleteRunner(taskID)
-}
-
-// executeTaskWithEventEmit는 Task를 실행하고 결과를 ControllerEvent로 emit합니다.
-// 이 함수는 goroutine에서 실행되며, 실행 완료 시 ControllerEvent를 전송합니다.
-func (c *Controller) executeTaskWithEventEmit(ctx context.Context, taskID, threadID string, task *storage.Task) {
-	defer func() {
-		// TaskContext 정리
-		c.mu.Lock()
-		if taskCtx, ok := c.taskContexts[taskID]; ok {
-			taskCtx.cancel()
-			delete(c.taskContexts, taskID)
-		}
-		c.mu.Unlock()
-
-		if r := recover(); r != nil {
-			c.logger.Error("Task execution panicked",
-				zap.String("task_id", taskID),
-				zap.Any("panic", r),
-			)
-			_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusFailed)
-
-			c.controllerEventChan <- ControllerEvent{
-				TaskID:   taskID,
-				ThreadID: threadID,
-				Status:   "failed",
-				Error:    fmt.Errorf("panic: %v", r),
-			}
-		}
-	}()
-
-	// Task 실행을 위한 context 생성 (5분 타임아웃)
-	taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-
-	// TaskContext 저장
-	c.mu.Lock()
-	c.taskContexts[taskID] = &TaskContext{
-		ctx:    taskCtx,
-		cancel: cancel,
-	}
-	c.mu.Unlock()
-
-	// Agent 정보 조회
-	agent, err := c.repo.GetAgent(ctx, task.AgentID)
-	if err != nil {
-		c.logger.Error("Failed to get agent info", zap.Error(err))
-		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
-
-		c.controllerEventChan <- ControllerEvent{
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Status:   "failed",
-			Error:    fmt.Errorf("agent not found: %w", err),
-		}
-		return
-	}
-
-	// RunnerManager에서 TaskRunner 조회 또는 생성
-	runner := c.runnerManager.GetRunner(taskID)
-	if runner == nil {
-		c.logger.Info("Runner not found, creating...",
-			zap.String("task_id", taskID),
-		)
-
-		agentInfo := taskrunner.AgentInfo{
-			AgentID:  agent.AgentID,
-			Provider: agent.Provider,
-			Model:    agent.Model,
-			Prompt:   agent.Prompt,
-		}
-		runner = c.runnerManager.CreateRunner(taskID, agentInfo, c.logger)
-	}
-
-	// 메시지 목록 조회
-	messages, err := c.repo.ListMessageIndexByTask(ctx, taskID)
-	if err != nil {
-		c.logger.Error("Failed to list messages", zap.Error(err))
-		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
-
-		c.controllerEventChan <- ControllerEvent{
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Status:   "failed",
-			Error:    fmt.Errorf("failed to list messages: %w", err),
-		}
-		return
-	}
-
-	// ChatMessage로 변환
-	chatMessages := make([]taskrunner.ChatMessage, 0, len(messages))
-	for _, msg := range messages {
-		content, err := c.readMessageFromFile(msg.FilePath)
-		if err != nil {
-			c.logger.Warn("Failed to read message file, skipping",
-				zap.String("file_path", msg.FilePath),
-				zap.Error(err),
-			)
-			continue
-		}
-
-		chatMessages = append(chatMessages, taskrunner.ChatMessage{
-			Role:    msg.Role,
-			Content: content,
-		})
-	}
-
-	// Prompt가 있으면 추가
-	if task.Prompt != "" {
-		chatMessages = append(chatMessages, taskrunner.ChatMessage{
-			Role:    "user",
-			Content: task.Prompt,
-		})
-	}
-
-	// RunRequest 구성 - 콜백 포함
-	req := &taskrunner.RunRequest{
-		TaskID:       taskID,
-		Model:        agent.Model,
-		SystemPrompt: agent.Prompt,
-		Messages:     chatMessages,
-		Callback:     c, // Controller가 StatusCallback 구현
-	}
-
-	// TaskRunner 실행
-	result, err := runner.Run(taskCtx, req)
-
-	// Context 취소/타임아웃 확인
-	if taskCtx.Err() != nil {
-		c.logger.Warn("Task execution canceled or timed out",
-			zap.String("task_id", taskID),
-			zap.Error(taskCtx.Err()),
-		)
-
-		status := storage.TaskStatusFailed
-		if errors.Is(taskCtx.Err(), context.Canceled) {
-			status = storage.TaskStatusCanceled
-		}
-		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, status)
-
-		c.controllerEventChan <- ControllerEvent{
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Status:   status,
-			Error:    taskCtx.Err(),
-		}
-
-		c.runnerManager.DeleteRunner(taskID)
-		return
-	}
-
-	// 실행 결과 처리
-	if err != nil {
-		c.logger.Error("Task execution failed",
-			zap.String("task_id", taskID),
-			zap.Error(err),
-		)
-		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusFailed)
-
-		c.controllerEventChan <- ControllerEvent{
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Status:   "failed",
-			Error:    err,
-		}
-	} else {
-		c.logger.Info("Task execution completed",
-			zap.String("task_id", taskID),
-			zap.Bool("success", result != nil && result.Success),
-		)
-
-		// 결과를 파일로 저장
-		if result.Success {
-			filePath, err := c.saveMessageToFile(context.Background(), taskID, "assistant", result.Output)
-			if err != nil {
-				c.logger.Error("Failed to save result to file", zap.Error(err))
-			} else {
-				// MessageIndex에 추가
-				if _, err := c.repo.AppendMessageIndex(context.Background(), taskID, "assistant", filePath); err != nil {
-					c.logger.Error("Failed to append message index", zap.Error(err))
-				}
-			}
-		}
-
-		// 성공 시 - waiting 상태로 유지 (자동 완료하지 않음)
-		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusWaiting)
-	}
-
-	// Runner 삭제하지 않음 - Task가 waiting 상태이므로 Runner 유지
-	// c.runnerManager.DeleteRunner(taskID)  // Phase 2: 명시적 완료 시에만 삭제
 }

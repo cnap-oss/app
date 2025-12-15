@@ -18,7 +18,6 @@ func (s *Server) controllerEventHandler(ctx context.Context) {
 		case result := <-s.controllerEventChan:
 			s.logger.Info("Received controller event",
 				zap.String("task_id", result.TaskID),
-				zap.String("thread_id", result.ThreadID),
 				zap.String("status", result.Status),
 			)
 			switch result.Status {
@@ -41,8 +40,8 @@ func (s *Server) controllerEventHandler(ctx context.Context) {
 }
 
 func (s *Server) sendMessageToDiscord(result controller.ControllerEvent) {
-	if result.ThreadID == "" {
-		s.logger.Warn("Thread ID is empty, cannot send result",
+	if result.TaskID == "" {
+		s.logger.Warn("Task ID is empty, cannot send result",
 			zap.String("task_id", result.TaskID),
 		)
 		return
@@ -51,25 +50,23 @@ func (s *Server) sendMessageToDiscord(result controller.ControllerEvent) {
 	content := result.Content
 
 	// 일반 메시지로 전송 (Embed 없이)
-	_, err := s.session.ChannelMessageSend(result.ThreadID, content)
+	_, err := s.session.ChannelMessageSend(result.TaskID, content)
 	if err != nil {
 		s.logger.Error("Failed to send message to Discord",
 			zap.String("task_id", result.TaskID),
-			zap.String("thread_id", result.ThreadID),
 			zap.Error(err),
 		)
 	} else {
 		s.logger.Debug("Message sent to Discord",
 			zap.String("task_id", result.TaskID),
-			zap.String("thread_id", result.ThreadID),
 		)
 	}
 }
 
 // sendResultToDiscord는 Task 실행 결과를 Discord Thread에 전송합니다.
 func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
-	if result.ThreadID == "" {
-		s.logger.Warn("Thread ID is empty, cannot send result",
+	if result.TaskID == "" {
+		s.logger.Warn("Task ID is empty, cannot send result",
 			zap.String("task_id", result.TaskID),
 		)
 		return
@@ -138,11 +135,10 @@ func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 			zap.String("task_id", result.TaskID),
 			zap.String("status", result.Status),
 		)
-		_, err := s.session.ChannelMessageSend(result.ThreadID, result.Content)
+		_, err := s.session.ChannelMessageSend(result.TaskID, result.Content)
 		if err != nil {
 			s.logger.Error("Failed to send message to Discord",
 				zap.String("task_id", result.TaskID),
-				zap.String("thread_id", result.ThreadID),
 				zap.Error(err),
 			)
 		}
@@ -150,17 +146,15 @@ func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 	}
 
 	// Discord에 메시지 전송
-	_, err := s.session.ChannelMessageSendEmbed(result.ThreadID, embed)
+	_, err := s.session.ChannelMessageSendEmbed(result.TaskID, embed)
 	if err != nil {
 		s.logger.Error("Failed to send result to Discord",
 			zap.String("task_id", result.TaskID),
-			zap.String("thread_id", result.ThreadID),
 			zap.Error(err),
 		)
 	} else {
 		s.logger.Info("Result sent to Discord",
 			zap.String("task_id", result.TaskID),
-			zap.String("thread_id", result.ThreadID),
 		)
 	}
 }

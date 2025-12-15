@@ -31,7 +31,7 @@ func (c *Controller) handleConnectorEvent(ctx context.Context, event ConnectorEv
 	c.logger.Info("Handling connector event",
 		zap.String("type", event.Type),
 		zap.String("task_id", event.TaskID),
-		zap.String("thread_id", event.ThreadID),
+		zap.String("agent_name", event.AgentName),
 	)
 
 	switch event.Type {
@@ -53,100 +53,66 @@ func (c *Controller) handleConnectorEvent(ctx context.Context, event ConnectorEv
 
 // handleExecuteEvent는 Task 실행 이벤트를 처리합니다.
 func (c *Controller) handleExecuteEvent(ctx context.Context, event ConnectorEvent) {
-	// Task 조회
+	c.logger.Info("Creating new task for thread",
+		zap.String("task_id", event.TaskID),
+		zap.String("agent", event.AgentName),
+	)
+
+	if err := c.CreateTask(ctx, event.AgentName, event.TaskID, event.Prompt); err != nil {
+		c.logger.Error("Failed to create task", zap.Error(err))
+		c.controllerEventChan <- ControllerEvent{
+			TaskID: event.TaskID,
+			Status: "failed",
+			Error:  fmt.Errorf("task not found: %w", err),
+		}
+		return
+	}
+
 	task, err := c.repo.GetTask(ctx, event.TaskID)
 	if err != nil {
-		c.logger.Error("Failed to get task",
-			zap.String("task_id", event.TaskID),
-			zap.Error(err),
-		)
+		c.logger.Error("Failed to get newly created task", zap.Error(err))
 		c.controllerEventChan <- ControllerEvent{
-			TaskID:   event.TaskID,
-			ThreadID: event.ThreadID,
-			Status:   "failed",
-			Error:    fmt.Errorf("task not found: %w", err),
+			TaskID: event.TaskID,
+			Status: "failed",
+			Error:  fmt.Errorf("task not found after creation: %w", err),
 		}
 		return
 	}
 
-	// 상태를 running으로 변경
-	if err := c.repo.UpsertTaskStatus(ctx, event.TaskID, task.AgentID, storage.TaskStatusRunning); err != nil {
-		c.logger.Error("Failed to update task status",
-			zap.String("task_id", event.TaskID),
-			zap.Error(err),
-		)
-		c.controllerEventChan <- ControllerEvent{
-			TaskID:   event.TaskID,
-			ThreadID: event.ThreadID,
-			Status:   "failed",
-			Error:    fmt.Errorf("failed to update status: %w", err),
-		}
-		return
-	}
-
-	// Task 실행 (별도 함수로 분리하여 결과 처리)
-	go c.executeTaskWithEventEmit(ctx, event.TaskID, event.ThreadID, task)
+	go c.executeTask(ctx, event.TaskID, task)
 }
 
 // handleContinueEvent는 기존 Task에 메시지 추가 후 실행 계속 이벤트를 처리합니다.
 // Thread 후속 메시지로 인해 기존 Task를 계속 실행해야 할 때 사용됩니다.
 func (c *Controller) handleContinueEvent(ctx context.Context, event ConnectorEvent) {
 	taskID := event.TaskID
-	threadID := event.ThreadID
 
 	c.logger.Info("Handling continue event",
 		zap.String("task_id", taskID),
-		zap.String("thread_id", threadID),
 	)
 
-	// 1. Task 조회
-	task, err := c.repo.GetTask(ctx, taskID)
-	if err != nil {
-		c.logger.Error("Failed to get task for continue",
+	if err := c.AddMessage(ctx, taskID, "user", event.Prompt); err != nil {
+		c.logger.Error("Failed to add message to task", zap.Error(err))
+		c.controllerEventChan <- ControllerEvent{
+			TaskID: taskID,
+			Status: "failed",
+			Error:  fmt.Errorf("failed to add message: %w", err),
+		}
+		return
+	}
+
+	// 4. Task 실행 (메시지 히스토리 포함) - SendMessage 사용
+	if err := c.SendMessage(ctx, taskID); err != nil {
+		c.logger.Error("Failed to send message",
 			zap.String("task_id", taskID),
 			zap.Error(err),
 		)
 		c.controllerEventChan <- ControllerEvent{
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Status:   "failed",
-			Error:    fmt.Errorf("task not found: %w", err),
+			TaskID: taskID,
+			Status: "failed",
+			Error:  fmt.Errorf("failed to send message: %w", err),
 		}
-		return
 	}
-
-	// 2. Task 상태 확인 (이미 실행 중이면 에러)
-	if task.Status == storage.TaskStatusRunning {
-		c.logger.Warn("Task already running, cannot continue",
-			zap.String("task_id", taskID),
-			zap.String("status", task.Status),
-		)
-		c.controllerEventChan <- ControllerEvent{
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Status:   "failed",
-			Error:    fmt.Errorf("task already running"),
-		}
-		return
-	}
-
-	// 3. 상태를 running으로 변경
-	if err := c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusRunning); err != nil {
-		c.logger.Error("Failed to update task status to running",
-			zap.String("task_id", taskID),
-			zap.Error(err),
-		)
-		c.controllerEventChan <- ControllerEvent{
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Status:   "failed",
-			Error:    fmt.Errorf("failed to update status: %w", err),
-		}
-		return
-	}
-
-	// 4. Task 실행 (메시지 히스토리 포함) - executeTaskWithEventEmit 재사용
-	go c.executeTaskWithEventEmit(ctx, taskID, threadID, task)
 }
 
 // handleCancelEvent는 Task 취소 이벤트를 처리합니다.
@@ -165,10 +131,9 @@ func (c *Controller) handleCancelEvent(ctx context.Context, event ConnectorEvent
 			zap.String("task_id", event.TaskID),
 		)
 		c.controllerEventChan <- ControllerEvent{
-			TaskID:   event.TaskID,
-			ThreadID: event.ThreadID,
-			Status:   "failed",
-			Error:    fmt.Errorf("task not running"),
+			TaskID: event.TaskID,
+			Status: "failed",
+			Error:  fmt.Errorf("task not running"),
 		}
 		return
 	}
@@ -177,21 +142,18 @@ func (c *Controller) handleCancelEvent(ctx context.Context, event ConnectorEvent
 	taskCtx.cancel()
 
 	c.controllerEventChan <- ControllerEvent{
-		TaskID:   event.TaskID,
-		ThreadID: event.ThreadID,
-		Status:   "canceled",
-		Content:  "Task canceled by user",
+		TaskID:  event.TaskID,
+		Status:  "canceled",
+		Content: "Task canceled by user",
 	}
 }
 
 // handleCompleteEvent handles the explicit task completion event.
 func (c *Controller) handleCompleteEvent(ctx context.Context, event ConnectorEvent) {
 	taskID := event.TaskID
-	threadID := event.ThreadID
 
 	c.logger.Info("Handling complete event",
 		zap.String("task_id", taskID),
-		zap.String("thread_id", threadID),
 	)
 
 	// 1. Task 조회
@@ -202,10 +164,9 @@ func (c *Controller) handleCompleteEvent(ctx context.Context, event ConnectorEve
 			zap.Error(err),
 		)
 		c.controllerEventChan <- ControllerEvent{
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Status:   "failed",
-			Error:    fmt.Errorf("task not found: %w", err),
+			TaskID: taskID,
+			Status: "failed",
+			Error:  fmt.Errorf("task not found: %w", err),
 		}
 		return
 	}
@@ -217,10 +178,9 @@ func (c *Controller) handleCompleteEvent(ctx context.Context, event ConnectorEve
 			zap.Error(err),
 		)
 		c.controllerEventChan <- ControllerEvent{
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Status:   "failed",
-			Error:    fmt.Errorf("failed to update status: %w", err),
+			TaskID: taskID,
+			Status: "failed",
+			Error:  fmt.Errorf("failed to update status: %w", err),
 		}
 		return
 	}
@@ -230,10 +190,9 @@ func (c *Controller) handleCompleteEvent(ctx context.Context, event ConnectorEve
 
 	// 4. completed 이벤트 전송
 	c.controllerEventChan <- ControllerEvent{
-		TaskID:   taskID,
-		ThreadID: threadID,
-		Status:   "completed",
-		Content:  "Task completed successfully",
+		TaskID:  taskID,
+		Status:  "completed",
+		Content: "Task completed successfully",
 	}
 
 	c.logger.Info("Task completed explicitly",

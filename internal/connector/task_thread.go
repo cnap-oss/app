@@ -85,33 +85,16 @@ func (s *Server) callAgentInThread(m *discordgo.Message, agent *controller.Agent
 		zap.String("user_message", m.Content),
 	)
 
-	// Task 존재 여부 확인
-	existingTask, err := s.controller.GetTask(ctx, taskID)
+	_, err := s.controller.GetTask(ctx, taskID)
 	if err != nil {
-		// Task가 없으면 새로 생성 (Thread 첫 메시지)
-		s.logger.Info("Creating new task for thread",
-			zap.String("task_id", taskID),
-			zap.String("agent", agent.Name),
-		)
-
-		if err := s.controller.CreateTask(ctx, agent.Name, taskID, m.Content); err != nil {
-			s.logger.Error("Failed to create task", zap.Error(err))
-			_, _ = s.session.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Task 생성 실패: %v", err))
-			return
+		// Task 실행 이벤트 전송 (새 Task, 비동기, 논블로킹)
+		s.connectorEventChan <- controller.ConnectorEvent{
+			Type:      "execute",
+			TaskID:    taskID,
+			AgentName: agent.Name,
+			Prompt:    m.Content,
 		}
 	} else {
-		// Task가 있으면 메시지만 추가 (Thread 후속 메시지)
-		s.logger.Info("Adding message to existing task",
-			zap.String("task_id", taskID),
-			zap.String("existing_status", existingTask.Status),
-		)
-
-		if err := s.controller.AddMessage(ctx, taskID, "user", m.Content); err != nil {
-			s.logger.Error("Failed to add message to task", zap.Error(err))
-			_, _ = s.session.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ 메시지 추가 실패: %v", err))
-			return
-		}
-
 		// "처리 중" 메시지 전송
 		embed := &discordgo.MessageEmbed{
 			Author:      &discordgo.MessageEmbedAuthor{Name: m.Author.Username, IconURL: m.Author.AvatarURL("")},
@@ -125,10 +108,10 @@ func (s *Server) callAgentInThread(m *discordgo.Message, agent *controller.Agent
 
 		// continue 이벤트 전송 (기존 Task 실행 계속)
 		s.connectorEventChan <- controller.ConnectorEvent{
-			Type:     "continue",
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Prompt:   m.Content,
+			Type:      "continue",
+			TaskID:    taskID,
+			AgentName: agent.Name,
+			Prompt:    m.Content,
 		}
 
 		s.logger.Info("Task continue event sent",
@@ -147,14 +130,6 @@ func (s *Server) callAgentInThread(m *discordgo.Message, agent *controller.Agent
 	}
 	if _, err := s.session.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
 		s.logger.Error("Failed to send processing message", zap.Error(err))
-	}
-
-	// Task 실행 이벤트 전송 (새 Task, 비동기, 논블로킹)
-	s.connectorEventChan <- controller.ConnectorEvent{
-		Type:     "execute",
-		TaskID:   taskID,
-		ThreadID: threadID,
-		Prompt:   m.Content,
 	}
 
 	s.logger.Info("Task execution event sent",

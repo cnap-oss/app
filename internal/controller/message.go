@@ -79,11 +79,6 @@ func (c *Controller) SendMessage(ctx context.Context, taskID string) error {
 		return fmt.Errorf("task is already running: %s", taskID)
 	}
 
-	// 완료된 작업은 재실행 불가
-	if task.Status == storage.TaskStatusCompleted || task.Status == storage.TaskStatusFailed {
-		return fmt.Errorf("task is already finished: %s (status: %s)", taskID, task.Status)
-	}
-
 	// 메시지 목록 조회
 	messages, err := c.repo.ListMessageIndexByTask(ctx, taskID)
 	if err != nil {

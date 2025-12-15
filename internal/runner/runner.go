@@ -156,17 +156,8 @@ func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
 	}
 	messages = append(messages, req.Messages...)
 
-	// 마지막 사용자 메시지를 prompt로 사용
-	var prompt string
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" {
-			prompt = messages[i].Content
-			break
-		}
-	}
-
-	// API 호출
-	result, err := r.Request(ctx, req.Model, req.TaskID, prompt)
+	// API 호출 - 전체 메시지 배열 전달
+	result, err := r.Request(ctx, req.Model, req.TaskID, messages)
 	if err != nil {
 		// 콜백이 있으면 에러 알림
 		if req.Callback != nil {
@@ -188,34 +179,40 @@ func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
 	return result, nil
 }
 
-// Request는 프롬프트를 OpenCode AI API 엔드포인트로 보내고 결과를 반환합니다.
-func (r *Runner) Request(ctx context.Context, model, name, prompt string) (*RunResult, error) {
-	promptPreview := prompt
-	if len(promptPreview) > 200 {
-		promptPreview = promptPreview[:200] + "..."
+// Request는 메시지 배열을 OpenCode AI API 엔드포인트로 보내고 결과를 반환합니다.
+func (r *Runner) Request(ctx context.Context, model, name string, messages []ChatMessage) (*RunResult, error) {
+	// 마지막 user 메시지를 로깅용 preview로 사용
+	var messagePreview string
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			messagePreview = messages[i].Content
+			break
+		}
+	}
+	if len(messagePreview) > 200 {
+		messagePreview = messagePreview[:200] + "..."
 	}
 
 	r.logger.Info("Sending request to OpenCode AI API",
 		zap.String("model", model),
 		zap.String("name", name),
-		zap.String("prompt_preview", promptPreview),
+		zap.String("message_preview", messagePreview),
+		zap.Int("message_count", len(messages)),
 	)
 
 	// OpenCode endpoint - baseURL 사용 (테스트 시 mock server 사용 가능)
 	endpoint := r.baseURL + "/chat/completions"
 
 	// OpenCode API 호출 (OpenAI 호환 포맷)
-	return r.callOpenCodeAPI(ctx, endpoint, r.apiKey, model, name, prompt)
+	return r.callOpenCodeAPI(ctx, endpoint, r.apiKey, model, name, messages)
 }
 
 // callOpenCodeAPI는 OpenCode API를 호출합니다 (OpenAI 호환 포맷).
-func (r *Runner) callOpenCodeAPI(ctx context.Context, endpoint, apiKey, model, name, prompt string) (*RunResult, error) {
-	// 요청 본문 구성
+func (r *Runner) callOpenCodeAPI(ctx context.Context, endpoint, apiKey, model, name string, messages []ChatMessage) (*RunResult, error) {
+	// 요청 본문 구성 - 전달받은 전체 메시지 배열 사용
 	reqBody := OpenCodeRequest{
-		Model: model,
-		Messages: []ChatMessage{
-			{Role: "user", Content: prompt},
-		},
+		Model:    model,
+		Messages: messages,
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -233,7 +230,7 @@ func (r *Runner) callOpenCodeAPI(ctx context.Context, endpoint, apiKey, model, n
 
 	client := r.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
+		client = &http.Client{Timeout: 120 * time.Second}
 	}
 
 	resp, err := client.Do(req)
