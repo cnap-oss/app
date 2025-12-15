@@ -600,9 +600,15 @@ func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, r
 	eventCtx, cancelEvent := context.WithCancel(ctx)
 	defer cancelEvent()
 
+	messageCompleted := make(chan bool, 1)
 	eventDone := make(chan error, 1)
 	go func() {
 		err := client.SubscribeEvents(eventCtx, func(event *Event) error {
+			r.logger.Debug("이벤트 수신",
+				zap.String("task_id", req.TaskID),
+				zap.String("event_type", event.Type),
+			)
+
 			// message.part.updated 이벤트 처리
 			if event.Type == "message.part.updated" {
 				if props, ok := event.Properties["part"].(map[string]interface{}); ok {
@@ -623,6 +629,19 @@ func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, r
 					}
 				}
 			}
+
+			// message.completed 이벤트 처리
+			if event.Type == "message.completed" {
+				r.logger.Info("메시지 완료 이벤트 수신",
+					zap.String("task_id", req.TaskID),
+					zap.Int("content_length", fullContent.Len()),
+				)
+				select {
+				case messageCompleted <- true:
+				default:
+				}
+			}
+
 			return nil
 		})
 		eventDone <- err
@@ -661,25 +680,75 @@ func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, r
 		return nil, fmt.Errorf("프롬프트 전송 실패: %w", err)
 	}
 
-	// 6. 이벤트 수신 완료 대기 (타임아웃 설정)
+	// 6. 메시지 완료 또는 타임아웃 대기
+	// 이벤트 수신을 위한 충분한 시간 대기 (최소 30초)
+	eventWaitTimeout := 30 * time.Second
 	select {
+	case <-messageCompleted:
+		r.logger.Info("메시지 완료 이벤트 수신",
+			zap.String("task_id", req.TaskID),
+			zap.Int("content_length", fullContent.Len()),
+		)
+		cancelEvent()
 	case err := <-eventDone:
+		// 이벤트 스트림이 종료됨 (정상 또는 에러)
 		if err != nil && err != context.Canceled {
 			r.logger.Warn("이벤트 스트림 에러",
 				zap.String("task_id", req.TaskID),
 				zap.Error(err),
 			)
+			// 에러가 있어도 받은 컨텐츠가 있으면 성공으로 처리
+			if fullContent.Len() > 0 {
+				r.logger.Info("컨텐츠가 있어 성공으로 처리",
+					zap.String("task_id", req.TaskID),
+					zap.Int("content_length", fullContent.Len()),
+				)
+			} else {
+				if req.Callback != nil {
+					_ = req.Callback.OnError(req.TaskID, err)
+				}
+				return nil, fmt.Errorf("이벤트 스트림 에러: %w", err)
+			}
 		}
-	case <-time.After(5 * time.Second):
-		// 타임아웃 - 정상 동작으로 간주
 		cancelEvent()
+	case <-time.After(eventWaitTimeout):
+		// 타임아웃 - 받은 컨텐츠가 있으면 성공으로 처리
+		r.logger.Info("이벤트 대기 타임아웃, 받은 컨텐츠로 진행",
+			zap.String("task_id", req.TaskID),
+			zap.Int("content_length", fullContent.Len()),
+		)
+		cancelEvent()
+	case <-ctx.Done():
+		r.logger.Warn("컨텍스트 취소됨",
+			zap.String("task_id", req.TaskID),
+			zap.Error(ctx.Err()),
+		)
+		cancelEvent()
+		// 컨텐츠가 있으면 반환, 없으면 에러
+		if fullContent.Len() == 0 {
+			return nil, ctx.Err()
+		}
+		r.logger.Info("컨텍스트 취소되었지만 컨텐츠가 있어 성공으로 처리",
+			zap.String("task_id", req.TaskID),
+			zap.Int("content_length", fullContent.Len()),
+		)
+	}
+
+	output := fullContent.String()
+
+	// 빈 응답 확인
+	if output == "" {
+		r.logger.Warn("빈 응답 수신",
+			zap.String("task_id", req.TaskID),
+		)
+		// 빈 응답도 에러로 처리하지 않고 경고만 출력
 	}
 
 	result := &RunResult{
 		Agent:   req.Model,
 		Name:    req.TaskID,
 		Success: true,
-		Output:  fullContent.String(),
+		Output:  output,
 		Error:   nil,
 	}
 

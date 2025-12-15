@@ -169,9 +169,19 @@ func (c *OpenCodeClient) Prompt(ctx context.Context, sessionID string, req *Prom
 		return nil, fmt.Errorf("응답 읽기 실패: %w", err)
 	}
 
-	// 빈 응답 체크
+	// 빈 응답 처리 - OpenCode Server는 비동기 처리 시 빈 응답을 반환할 수 있음
 	if len(bodyBytes) == 0 {
-		return nil, fmt.Errorf("응답 파싱 실패: 빈 응답")
+		c.logger.Warn("빈 응답 수신 - 비동기 처리 중일 수 있음",
+			zap.String("session_id", sessionID),
+		)
+		// 빈 응답이지만 정상 처리로 간주 (이벤트 스트림으로 실제 응답 수신 예정)
+		return &PromptResponse{
+			Info: AssistantMessage{
+				ID:   "", // 빈 ID - 이벤트에서 실제 메시지 확인 필요
+				Role: "assistant",
+			},
+			Parts: []Part{},
+		}, nil
 	}
 
 	var result PromptResponse
