@@ -1,11 +1,8 @@
 package taskrunner
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -500,9 +497,10 @@ func (r *Runner) Stop(ctx context.Context) error {
 // handleEvent는 SSE 이벤트를 처리하는 핸들러입니다.
 // 이 메서드는 백그라운드 고루틴에서 실행되며, 모든 이벤트를 수신하여 처리합니다.
 func (r *Runner) handleEvent(event *Event) error {
-	r.logger.Debug("이벤트 수신",
+	r.logger.Info("이벤트 수신",
 		zap.String("runner_id", r.ID),
 		zap.String("event_type", event.Type),
+		zap.Any("properties", event.Properties),
 	)
 
 	// SSE 이벤트를 RunnerMessage로 변환
@@ -631,12 +629,11 @@ func (r *Runner) Run(ctx context.Context, req *RunRequest) error {
 
 	// 비동기 실행 시작
 	go func() {
-		result, err := r.runInternal(ctx, req)
+		err := r.runInternal(ctx, req)
 		if err != nil {
 			_ = r.callback.OnError(req.TaskID, err)
 			return
 		}
-		_ = r.callback.OnComplete(req.TaskID, result)
 	}()
 
 	return nil
@@ -645,7 +642,7 @@ func (r *Runner) Run(ctx context.Context, req *RunRequest) error {
 // runInternal은 실제 실행 로직을 담당합니다.
 // Start()에서 이미 세션이 생성되고 이벤트 구독이 시작되었으므로,
 // 여기서는 프롬프트만 전송하고 결과를 기다립니다.
-func (r *Runner) runInternal(ctx context.Context, req *RunRequest) (*RunResult, error) {
+func (r *Runner) runInternal(ctx context.Context, req *RunRequest) error {
 	r.Status = RunnerStatusRunning
 	defer func() {
 		r.Status = RunnerStatusReady
@@ -659,7 +656,7 @@ func (r *Runner) runInternal(ctx context.Context, req *RunRequest) (*RunResult, 
 
 	// 세션이 준비되었는지 확인
 	if r.sessionID == "" || r.apiClient == nil {
-		return nil, fmt.Errorf("세션이 준비되지 않음")
+		return fmt.Errorf("세션이 준비되지 않음")
 	}
 
 	// 누적 컨텐츠 초기화 (새 실행 시작)
@@ -689,61 +686,12 @@ func (r *Runner) runInternal(ctx context.Context, req *RunRequest) (*RunResult, 
 		Parts: parts,
 	}
 
-	_, err := r.apiClient.Prompt(ctx, r.sessionID, promptReq)
+	err := r.apiClient.PromptAsync(ctx, r.sessionID, promptReq)
 	if err != nil {
-		return nil, fmt.Errorf("프롬프트 전송 실패: %w", err)
+		return fmt.Errorf("프롬프트 전송 실패: %w", err)
 	}
 
-	// 메시지 완료 대기
-	// 이벤트는 백그라운드 고루틴(handleEvent)에서 처리되고 있으며,
-	// 완료 시 fullContent에 누적됩니다.
-	// 여기서는 적절한 타임아웃을 두고 완료를 기다립니다.
-
-	eventWaitTimeout := 30 * time.Second
-	deadline := time.Now().Add(eventWaitTimeout)
-
-	// 간단한 폴링 방식으로 완료 확인
-	// 실제로는 이벤트 스트림이 백그라운드에서 계속 처리 중
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			r.logger.Warn("컨텍스트 취소됨",
-				zap.String("task_id", req.TaskID),
-				zap.Error(ctx.Err()),
-			)
-			return nil, ctx.Err()
-		default:
-		}
-
-		// 컨텐츠가 수신되었는지 확인
-		// TODO: 더 나은 완료 감지 메커니즘 필요 (예: completion 채널)
-		time.Sleep(100 * time.Millisecond)
-
-		// 타임아웃 전에 충분한 대기 시간 제공
-		// 실제 완료는 이벤트 핸들러가 처리
-	}
-
-	// 타임아웃 후 현재까지 받은 컨텐츠 반환
-	output := r.fullContent.String()
-
-	if output == "" {
-		r.logger.Warn("빈 응답 수신", zap.String("task_id", req.TaskID))
-	} else {
-		r.logger.Info("실행 완료",
-			zap.String("task_id", req.TaskID),
-			zap.Int("content_length", len(output)),
-		)
-	}
-
-	result := &RunResult{
-		Agent:   req.Model,
-		Name:    req.TaskID,
-		Success: true,
-		Output:  output,
-		Error:   nil,
-	}
-
-	return result, nil
+	return nil
 }
 
 // convertEventToMessage는 OpenCode SSE Event를 RunnerMessage로 변환합니다.
@@ -776,11 +724,6 @@ func (r *Runner) convertEventToMessage(event *Event, sessionID string) *RunnerMe
 		Timestamp: time.Now(),
 		RawEvent:  event,
 	}
-
-	r.logger.Info("opencode message received",
-		zap.String("event_type", event.Type),
-		zap.Any("properties", event.Properties),
-	)
 
 	switch event.Type {
 	case "message.part.updated":
@@ -875,110 +818,7 @@ func parseModel(model string) (providerID, modelID string) {
 		return parts[0], parts[1]
 	}
 	// 기본값
-	return "anthropic", model
-}
-
-// Request는 메시지 배열을 OpenCode AI API 엔드포인트로 보내고 결과를 반환합니다.
-func (r *Runner) Request(ctx context.Context, model, name string, messages []ChatMessage) (*RunResult, error) {
-	// 마지막 user 메시지를 로깅용 preview로 사용
-	var messagePreview string
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" {
-			messagePreview = messages[i].Content
-			break
-		}
-	}
-	if len(messagePreview) > 200 {
-		messagePreview = messagePreview[:200] + "..."
-	}
-
-	r.logger.Info("Sending request to OpenCode AI API",
-		zap.String("model", model),
-		zap.String("name", name),
-		zap.String("message_preview", messagePreview),
-		zap.Int("message_count", len(messages)),
-	)
-
-	// OpenCode endpoint - baseURL 사용 (테스트 시 mock server 사용 가능)
-	endpoint := r.baseURL + "/chat/completions"
-
-	// OpenCode API 호출 (OpenAI 호환 포맷)
-	return r.callOpenCodeAPI(ctx, endpoint, r.apiKey, model, name, messages)
-}
-
-// callOpenCodeAPI는 OpenCode API를 호출합니다 (OpenAI 호환 포맷).
-func (r *Runner) callOpenCodeAPI(ctx context.Context, endpoint, apiKey, model, name string, messages []ChatMessage) (*RunResult, error) {
-	// 요청 본문 구성 - 전달받은 전체 메시지 배열 사용
-	reqBody := OpenCodeRequest{
-		Model:    model,
-		Messages: messages,
-	}
-
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("요청 바디 직렬화 실패: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("요청 생성 실패: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	client := r.httpClient
-	if client == nil {
-		client = &http.Client{Timeout: 120 * time.Second}
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API 요청 실패: %w", err)
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("응답 읽기 실패: %w", err)
-	}
-
-	contentType := resp.Header.Get("Content-Type")
-	r.logger.Debug("Response received",
-		zap.String("content_type", contentType),
-		zap.String("body_preview", summarizeBody(bodyBytes)),
-	)
-
-	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("API 응답 오류: %s - %s", resp.Status, summarizeBody(bodyBytes))
-	}
-
-	var apiResp OpenCodeResponse
-	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
-		return nil, fmt.Errorf("응답 파싱 실패: %w\n\n[응답 원문]\n%s", err, string(bodyBytes))
-	}
-
-	// 에러 필드 처리
-	if apiResp.Error != nil {
-		return nil, fmt.Errorf("API 에러: %s - %s", apiResp.Error.Type, apiResp.Error.Message)
-	}
-
-	output := "(empty result)"
-	if len(apiResp.Choices) > 0 {
-		output = apiResp.Choices[0].Message.Content
-	}
-
-	r.logger.Info("AI API 응답 수신 완료",
-		zap.String("output_preview", summarizeBody([]byte(output))),
-	)
-
-	return &RunResult{
-		Agent:   model,
-		Name:    name,
-		Success: true,
-		Output:  output,
-		Error:   nil,
-	}, nil
+	return "opencode", model
 }
 
 // RunResult는 에이전트 실행 결과를 나타냅니다.
@@ -988,15 +828,4 @@ type RunResult struct {
 	Success bool
 	Output  string
 	Error   error
-}
-
-func summarizeBody(body []byte) string {
-	trimmed := strings.TrimSpace(string(body))
-	if trimmed == "" {
-		return "<empty>"
-	}
-	if len(trimmed) > 200 {
-		return trimmed[:200] + "..."
-	}
-	return trimmed
 }
