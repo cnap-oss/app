@@ -31,10 +31,11 @@ type RunRequest struct {
 
 // AgentInfo는 에이전트 실행에 필요한 정보를 담는 구조체입니다.
 type AgentInfo struct {
-	AgentID  string
-	Provider string
-	Model    string
-	Prompt   string
+	AgentID       string
+	Provider      string
+	Model         string
+	Prompt        string
+	WorkspacePath string // 신규: Agent 작업 공간 경로
 }
 
 // StatusCallback은 Task 실행 중 상태 변경을 Controller에 알리기 위한 콜백 인터페이스입니다.
@@ -55,19 +56,57 @@ type StatusCallback interface {
 
 const defaultBaseURL = "https://opencode.ai/zen/v1"
 
-// Runner는 short-living 에이전트 실행을 담당하는 TaskRunner 구현체입니다.
+// Runner 상태 상수
+const (
+	RunnerStatusPending  = "pending"
+	RunnerStatusStarting = "starting"
+	RunnerStatusReady    = "ready"
+	RunnerStatusRunning  = "running"
+	RunnerStatusStopping = "stopping"
+	RunnerStatusStopped  = "stopped"
+	RunnerStatusFailed   = "failed"
+)
+
+// Runner는 Docker Container 기반 TaskRunner 구현체입니다.
 type Runner struct {
-	ID         string
-	Status     string
-	agentInfo  AgentInfo
-	logger     *zap.Logger
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
+	// 식별 정보
+	ID            string // Task ID (Runner 식별자)
+	ContainerID   string // Docker Container ID
+	ContainerName string // Docker Container 이름
+
+	// 상태 정보
+	Status string // Runner 상태
+
+	// Agent 정보
+	agentInfo AgentInfo
+
+	// 네트워크 정보
+	HostPort      int    // 호스트에 매핑된 포트
+	ContainerPort int    // Container 내부 포트
+	BaseURL       string // OpenCode Server URL (http://localhost:{HostPort})
+
+	// 작업 공간
+	WorkspacePath string // 마운트된 작업 공간 경로
+
+	// 내부 의존성
+	dockerClient DockerClient
+	httpClient   *http.Client
+	logger       *zap.Logger
+
+	// 레거시 필드 (Phase 2 이후 제거 예정)
+	apiKey  string
+	baseURL string
 }
 
 // RunnerOption은 Runner 초기화 옵션을 설정하기 위한 함수 타입입니다.
 type RunnerOption func(*Runner)
+
+// WithDockerClient는 Runner가 사용할 DockerClient를 주입합니다(테스트용).
+func WithDockerClient(client DockerClient) RunnerOption {
+	return func(r *Runner) {
+		r.dockerClient = client
+	}
+}
 
 // WithHTTPClient는 Runner가 사용할 http.Client를 주입합니다(테스트용).
 func WithHTTPClient(client *http.Client) RunnerOption {
@@ -80,6 +119,20 @@ func WithHTTPClient(client *http.Client) RunnerOption {
 func WithBaseURL(url string) RunnerOption {
 	return func(r *Runner) {
 		r.baseURL = url
+	}
+}
+
+// WithContainerPort는 Container 내부 포트를 지정합니다(테스트용).
+func WithContainerPort(port int) RunnerOption {
+	return func(r *Runner) {
+		r.ContainerPort = port
+	}
+}
+
+// WithWorkspacePath는 작업 공간 경로를 지정합니다(테스트용).
+func WithWorkspacePath(path string) RunnerOption {
+	return func(r *Runner) {
+		r.WorkspacePath = path
 	}
 }
 
@@ -115,37 +168,264 @@ type OpenCodeResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// NewRunner는 새로운 Runner를 생성합니다.
-func NewRunner(logger *zap.Logger, opts ...RunnerOption) *Runner {
+// NewRunner는 새로운 Container 기반 Runner를 생성합니다.
+// 이 함수는 Container를 생성하지 않고 Runner 구조체만 초기화합니다.
+// Container 시작은 Start() 메서드로 별도로 수행해야 합니다.
+func NewRunner(taskID string, agentInfo AgentInfo, logger *zap.Logger, opts ...RunnerOption) (*Runner, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 
-	apiKey := os.Getenv("OPEN_CODE_API_KEY")
-	if apiKey == "" {
-		logger.Fatal("환경 변수 OPEN_CODE_API_KEY가 설정되어 있지 않습니다")
+	// 기본 설정
+	workspaceBaseDir := os.Getenv("RUNNER_WORKSPACE_DIR")
+	if workspaceBaseDir == "" {
+		workspaceBaseDir = "./data/workspace"
+	}
+
+	workspacePath := agentInfo.WorkspacePath
+	if workspacePath == "" {
+		workspacePath = fmt.Sprintf("%s/%s", workspaceBaseDir, agentInfo.AgentID)
 	}
 
 	r := &Runner{
-		logger:     logger,
-		apiKey:     apiKey,
-		baseURL:    defaultBaseURL,
-		httpClient: &http.Client{Timeout: 20 * time.Second},
+		ID:            taskID,
+		Status:        RunnerStatusPending,
+		agentInfo:     agentInfo,
+		logger:        logger,
+		httpClient:    &http.Client{Timeout: 120 * time.Second},
+		ContainerPort: 3000,
+		WorkspacePath: workspacePath,
+		ContainerName: fmt.Sprintf("cnap-runner-%s", taskID),
+		// 레거시 필드 (Phase 2 이후 제거)
+		apiKey:  os.Getenv("OPEN_CODE_API_KEY"),
+		baseURL: defaultBaseURL,
 	}
 
+	// 옵션 적용
 	for _, opt := range opts {
 		opt(r)
 	}
 
-	return r
+	// DockerClient가 주입되지 않았으면 새로 생성
+	if r.dockerClient == nil {
+		client, err := NewDockerClient()
+		if err != nil {
+			return nil, fmt.Errorf("docker client 생성 실패: %w", err)
+		}
+		r.dockerClient = client
+	}
+
+	return r, nil
+}
+
+// Start는 Runner Container를 시작합니다.
+func (r *Runner) Start(ctx context.Context) error {
+	r.logger.Info("Starting runner container",
+		zap.String("runner_id", r.ID),
+		zap.String("container_name", r.ContainerName),
+	)
+
+	r.Status = RunnerStatusStarting
+
+	// 작업 공간 디렉토리 생성
+	if err := os.MkdirAll(r.WorkspacePath, 0755); err != nil {
+		r.Status = RunnerStatusFailed
+		return fmt.Errorf("작업 공간 생성 실패: %w", err)
+	}
+
+	// 환경 변수 구성
+	env := r.buildEnvironmentVariables()
+
+	// Docker 이미지 이름
+	imageName := os.Getenv("RUNNER_IMAGE")
+	if imageName == "" {
+		imageName = "cnap-runner:latest"
+	}
+
+	// Container 생성
+	containerID, err := r.dockerClient.CreateContainer(ctx, ContainerConfig{
+		Image: imageName,
+		Name:  r.ContainerName,
+		Env:   env,
+		Mounts: []MountConfig{
+			{
+				Source: r.WorkspacePath,
+				Target: "/workspace",
+			},
+		},
+		PortBinding: &PortConfig{
+			HostPort:      "0", // 동적 포트 할당
+			ContainerPort: fmt.Sprintf("%d", r.ContainerPort),
+		},
+		Labels: map[string]string{
+			"cnap.runner.id":      r.ID,
+			"cnap.agent.id":       r.agentInfo.AgentID,
+			"cnap.runner.managed": "true",
+		},
+	})
+	if err != nil {
+		r.Status = RunnerStatusFailed
+		return fmt.Errorf("container 생성 실패: %w", err)
+	}
+	r.ContainerID = containerID
+
+	// Container 시작
+	if err := r.dockerClient.StartContainer(ctx, r.ContainerID); err != nil {
+		r.Status = RunnerStatusFailed
+		// 생성된 Container 정리
+		_ = r.dockerClient.RemoveContainer(ctx, r.ContainerID)
+		return fmt.Errorf("container 시작 실패: %w", err)
+	}
+
+	// Container 정보 조회하여 포트 매핑 확인
+	info, err := r.dockerClient.ContainerInspect(ctx, r.ContainerID)
+	if err != nil {
+		r.Status = RunnerStatusFailed
+		_ = r.Stop(ctx)
+		return fmt.Errorf("container 조회 실패: %w", err)
+	}
+
+	// 포트 매핑 확인
+	portKey := fmt.Sprintf("%d/tcp", r.ContainerPort)
+	hostPort, ok := info.Ports[portKey]
+	if !ok {
+		r.Status = RunnerStatusFailed
+		_ = r.Stop(ctx)
+		return fmt.Errorf("포트 매핑을 찾을 수 없음: %d", r.ContainerPort)
+	}
+
+	var port int
+	_, err = fmt.Sscanf(hostPort, "%d", &port)
+	if err != nil {
+		r.Status = RunnerStatusFailed
+		_ = r.Stop(ctx)
+		return fmt.Errorf("포트 파싱 실패: %w", err)
+	}
+	r.HostPort = port
+	r.BaseURL = fmt.Sprintf("http://localhost:%d", port)
+
+	// Health check 대기
+	if err := r.waitForHealthy(ctx); err != nil {
+		r.Status = RunnerStatusFailed
+		_ = r.Stop(ctx)
+		return fmt.Errorf("health check 실패: %w", err)
+	}
+
+	r.Status = RunnerStatusReady
+	r.logger.Info("Runner container started successfully",
+		zap.String("runner_id", r.ID),
+		zap.String("container_id", r.ContainerID),
+		zap.Int("host_port", r.HostPort),
+	)
+
+	return nil
+}
+
+// Stop은 Runner Container를 중지하고 제거합니다.
+func (r *Runner) Stop(ctx context.Context) error {
+	r.logger.Info("Stopping runner container",
+		zap.String("runner_id", r.ID),
+		zap.String("container_id", r.ContainerID),
+	)
+
+	r.Status = RunnerStatusStopping
+
+	if r.ContainerID == "" {
+		r.Status = RunnerStatusStopped
+		return nil
+	}
+
+	// Container 중지
+	if err := r.dockerClient.StopContainer(ctx, r.ContainerID, 10); err != nil {
+		r.logger.Warn("Container 중지 중 오류",
+			zap.String("container_id", r.ContainerID),
+			zap.Error(err),
+		)
+	}
+
+	// Container 삭제
+	if err := r.dockerClient.RemoveContainer(ctx, r.ContainerID); err != nil {
+		r.logger.Warn("Container 삭제 중 오류",
+			zap.String("container_id", r.ContainerID),
+			zap.Error(err),
+		)
+	}
+
+	r.Status = RunnerStatusStopped
+	r.ContainerID = ""
+
+	return nil
+}
+
+// buildEnvironmentVariables는 Container에 전달할 환경 변수를 구성합니다.
+func (r *Runner) buildEnvironmentVariables() []string {
+	env := []string{
+		fmt.Sprintf("OPENCODE_MODEL=%s", r.agentInfo.Model),
+	}
+
+	// API 키 전달 (환경 변수에서 읽기)
+	if apiKey := os.Getenv("OPENCODE_API_KEY"); apiKey != "" {
+		env = append(env, fmt.Sprintf("OPENCODE_API_KEY=%s", apiKey))
+	}
+	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+		env = append(env, fmt.Sprintf("ANTHROPIC_API_KEY=%s", apiKey))
+	}
+	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
+		env = append(env, fmt.Sprintf("OPENAI_API_KEY=%s", apiKey))
+	}
+	// 레거시 지원
+	if apiKey := os.Getenv("OPEN_CODE_API_KEY"); apiKey != "" {
+		env = append(env, fmt.Sprintf("OPENCODE_API_KEY=%s", apiKey))
+	}
+
+	return env
+}
+
+// waitForHealthy는 Container가 준비될 때까지 대기합니다.
+func (r *Runner) waitForHealthy(ctx context.Context) error {
+	healthURL := fmt.Sprintf("%s/health", r.BaseURL)
+	timeout := 60 * time.Second
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		resp, err := r.httpClient.Get(healthURL)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return fmt.Errorf("health check 타임아웃")
 }
 
 // ensure Runner implements TaskRunner interface
 var _ TaskRunner = (*Runner)(nil)
 
 // Run implements TaskRunner interface.
+// Phase 1에서는 레거시 OpenCode API를 사용하며, Phase 2에서 Container 기반으로 전환됩니다.
 func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
-	r.logger.Info("Runner starting task", zap.String("messages", fmt.Sprintf("%+v", req.Messages)))
+	// Container 기반 실행 준비 (Phase 2에서 활성화)
+	if r.ContainerID != "" && r.Status == RunnerStatusReady {
+		// Phase 2: Container 내 OpenCode Server로 요청
+		// TODO: Phase 2에서 구현
+		r.logger.Info("Container-based execution will be implemented in Phase 2",
+			zap.String("runner_id", r.ID),
+			zap.String("container_id", r.ContainerID),
+		)
+	}
+
+	// Phase 1: 레거시 OpenCode API 사용 (기존 동작 유지)
+	r.logger.Info("Runner starting task (legacy mode)", zap.String("messages", fmt.Sprintf("%+v", req.Messages)))
 	// 시스템 프롬프트와 메시지를 결합
 	messages := make([]ChatMessage, 0, len(req.Messages)+1)
 	if req.SystemPrompt != "" {

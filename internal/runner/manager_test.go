@@ -1,11 +1,13 @@
 package taskrunner
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
+	"github.com/stretchr/testify/require"
 )
 
 // mockAgentInfo is a mock AgentInfo for testing.
@@ -15,6 +17,45 @@ func mockAgentInfo() AgentInfo {
 		Model:   "grok-code",
 		Prompt:  "test prompt",
 	}
+}
+
+// mockDockerClient is a mock DockerClient for testing.
+type mockDockerClient struct{}
+
+func (m *mockDockerClient) CreateContainer(ctx context.Context, config ContainerConfig) (string, error) {
+	return "mock-container-id", nil
+}
+
+func (m *mockDockerClient) StartContainer(ctx context.Context, containerID string) error {
+	return nil
+}
+
+func (m *mockDockerClient) StopContainer(ctx context.Context, containerID string, timeout int) error {
+	return nil
+}
+
+func (m *mockDockerClient) RemoveContainer(ctx context.Context, containerID string) error {
+	return nil
+}
+
+func (m *mockDockerClient) ContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
+	return nil, nil
+}
+
+func (m *mockDockerClient) ContainerInspect(ctx context.Context, containerID string) (ContainerInfo, error) {
+	return ContainerInfo{
+		ID:    containerID,
+		State: "running",
+		Ports: map[string]string{"3000/tcp": "8080"},
+	}, nil
+}
+
+func (m *mockDockerClient) Ping(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockDockerClient) Close() error {
+	return nil
 }
 
 func TestRunnerManager_Singleton(t *testing.T) {
@@ -29,39 +70,39 @@ func TestRunnerManager_CRUD(t *testing.T) {
 
 	rm := GetRunnerManager()
 
-	// Ensure clean state for test (though singleton persists, so we might need to clear it if tests run in same process)
-	// Since we can't easily reset the singleton once, we just work with what we have or clear the map manually.
+	// Ensure clean state for test
 	rm.mu.Lock()
 	rm.runners = make(map[string]*Runner)
 	rm.mu.Unlock()
 
 	agent := mockAgentInfo()
 	taskId := "task-1"
+	ctx := context.Background()
 
 	// Create
-	runner := rm.CreateRunner(taskId, agent, zap.NewNop())
+	runner, err := rm.CreateRunner(ctx, taskId, agent)
+	require.NoError(t, err)
 	assert.NotNil(t, runner)
 	assert.Equal(t, taskId, runner.ID)
-	assert.Equal(t, "Pending", runner.Status)
+	assert.Equal(t, RunnerStatusPending, runner.Status)
 
 	// List
 	runners := rm.ListRunner()
 	assert.NotNil(t, runners)
-	assert.Len(t, *runners, 1)
-	assert.Equal(t, taskId, (*runners)[0].ID)
+	assert.Len(t, runners, 1)
+	assert.Equal(t, taskId, runners[0].ID)
 
 	// Delete
-	deletedRunner := rm.DeleteRunner(taskId)
-	assert.NotNil(t, deletedRunner)
-	assert.Equal(t, taskId, deletedRunner.ID)
+	err = rm.DeleteRunner(ctx, taskId)
+	require.NoError(t, err)
 
 	// List after delete
 	runners = rm.ListRunner()
-	assert.Len(t, *runners, 0)
+	assert.Len(t, runners, 0)
 
 	// Delete non-existent
-	nilRunner := rm.DeleteRunner("non-existent")
-	assert.Nil(t, nilRunner)
+	err = rm.DeleteRunner(ctx, "non-existent")
+	assert.NoError(t, err) // Should not error on non-existent
 }
 
 // TestRunnerManager_GetRunner tests the GetRunner method
@@ -75,13 +116,15 @@ func TestRunnerManager_GetRunner(t *testing.T) {
 
 	agent := mockAgentInfo()
 	taskId := "task-get"
+	ctx := context.Background()
 
 	// Get non-existent runner
 	runner := rm.GetRunner(taskId)
 	assert.Nil(t, runner)
 
 	// Create runner
-	createdRunner := rm.CreateRunner(taskId, agent, zap.NewNop())
+	createdRunner, err := rm.CreateRunner(ctx, taskId, agent)
+	require.NoError(t, err)
 	assert.NotNil(t, createdRunner)
 
 	// Get existing runner
@@ -102,13 +145,15 @@ func TestRunnerManager_ConcurrentAccess(t *testing.T) {
 
 	agent := mockAgentInfo()
 	numGoroutines := 100
+	ctx := context.Background()
 
 	// Concurrently create runners
 	done := make(chan bool, numGoroutines)
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
 			taskId := fmt.Sprintf("task-%d", id)
-			runner := rm.CreateRunner(taskId, agent, zap.NewNop())
+			runner, err := rm.CreateRunner(ctx, taskId, agent)
+			assert.NoError(t, err)
 			assert.NotNil(t, runner)
 			done <- true
 		}(i)
@@ -121,7 +166,7 @@ func TestRunnerManager_ConcurrentAccess(t *testing.T) {
 
 	// Verify all runners were created
 	runners := rm.ListRunner()
-	assert.Len(t, *runners, numGoroutines)
+	assert.Len(t, runners, numGoroutines)
 
 	// Concurrently read and delete runners
 	for i := 0; i < numGoroutines; i++ {
@@ -133,8 +178,8 @@ func TestRunnerManager_ConcurrentAccess(t *testing.T) {
 			assert.NotNil(t, runner)
 
 			// Delete runner
-			deleted := rm.DeleteRunner(taskId)
-			assert.NotNil(t, deleted)
+			err := rm.DeleteRunner(ctx, taskId)
+			assert.NoError(t, err)
 
 			done <- true
 		}(i)
@@ -147,11 +192,11 @@ func TestRunnerManager_ConcurrentAccess(t *testing.T) {
 
 	// Verify all runners were deleted
 	runners = rm.ListRunner()
-	assert.Len(t, *runners, 0)
+	assert.Len(t, runners, 0)
 }
 
-// TestRunnerManager_NilLogger tests CreateRunner with nil logger
-func TestRunnerManager_NilLogger(t *testing.T) {
+// TestRunnerManager_GetRunnerCount tests the GetRunnerCount method
+func TestRunnerManager_GetRunnerCount(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
 	rm := GetRunnerManager()
@@ -160,11 +205,18 @@ func TestRunnerManager_NilLogger(t *testing.T) {
 	rm.mu.Unlock()
 
 	agent := mockAgentInfo()
-	taskId := "task-nil-logger"
+	ctx := context.Background()
 
-	// CreateRunner should handle nil logger gracefully
-	runner := rm.CreateRunner(taskId, agent, nil)
-	assert.NotNil(t, runner)
-	assert.Equal(t, taskId, runner.ID)
-	assert.NotNil(t, runner.logger) // Should have initialized with zap.NewNop()
+	// Initial count should be 0
+	assert.Equal(t, 0, rm.GetRunnerCount())
+
+	// Create runners
+	for i := 0; i < 5; i++ {
+		taskId := fmt.Sprintf("task-%d", i)
+		_, err := rm.CreateRunner(ctx, taskId, agent)
+		require.NoError(t, err)
+	}
+
+	// Count should be 5
+	assert.Equal(t, 5, rm.GetRunnerCount())
 }
