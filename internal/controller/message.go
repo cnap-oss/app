@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/cnap-oss/app/internal/common"
 	"github.com/cnap-oss/app/internal/storage"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -142,10 +143,10 @@ func (c *Controller) ListMessages(ctx context.Context, taskID string) ([]storage
 }
 
 // saveMessageToFile saves message content to a file and returns the file path.
-// Messages are stored in data/messages/{taskID}/{conversationIndex}.json
+// Messages are stored in {MessagesDir}/{taskID}/{conversationIndex}.json
 func (c *Controller) saveMessageToFile(ctx context.Context, taskID, role, content string) (string, error) {
 	// 1. 디렉토리 생성
-	dir := filepath.Join("data", "messages", taskID)
+	dir := filepath.Join(common.GetMessagesDir(), taskID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		c.logger.Error("Failed to create message directory",
 			zap.String("dir", dir),

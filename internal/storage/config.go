@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cnap-oss/app/internal/common"
 	gormlogger "gorm.io/gorm/logger"
 )
 
@@ -48,12 +49,8 @@ func ConfigFromEnv() (Config, error) {
 
 // getDefaultSQLiteDSN은 로컬 개발용 기본 SQLite DSN을 반환합니다.
 func getDefaultSQLiteDSN() string {
-	// 환경변수로 SQLite 파일 경로를 재정의할 수 있음
-	if sqlitePath := os.Getenv("SQLITE_DATABASE"); sqlitePath != "" {
-		return sqlitePath
-	}
-	// 기본값: ./data/cnap.db
-	return "./data/cnap.db"
+	// common.GetDatabasePath()는 SQLITE_DATABASE 환경변수와 기본 경로를 처리합니다
+	return common.GetDatabasePath()
 }
 
 func parseLogLevel(value string) gormlogger.LogLevel {

@@ -211,11 +211,32 @@ func TestWorkspaceManager_ListWorkspaces_NonexistentDir(t *testing.T) {
 }
 
 func TestWorkspaceManager_DefaultConfig(t *testing.T) {
+	// HOME 환경변수를 임시로 설정하여 테스트
+	oldHome := os.Getenv("HOME")
+	tmpHome, err := os.MkdirTemp("", "test-home-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpHome)
+
+	require.NoError(t, os.Setenv("HOME", tmpHome))
+	defer func() {
+		_ = os.Setenv("HOME", oldHome)
+	}()
+
+	// CNAP_DIR 환경변수가 없는지 확인
+	oldCnapDir := os.Getenv("CNAP_DIR")
+	require.NoError(t, os.Unsetenv("CNAP_DIR"))
+	defer func() {
+		if oldCnapDir != "" {
+			_ = os.Setenv("CNAP_DIR", oldCnapDir)
+		}
+	}()
+
 	config := DefaultWorkspaceConfig()
 
-	assert.Equal(t, "./data/workspace", config.BaseDir)
-	assert.Equal(t, "./data/configs/opencode/default-config.json", config.DefaultConfigPath)
-	assert.Equal(t, "./data/configs/opencode/default-mcp.json", config.DefaultMCPPath)
+	expectedBase := filepath.Join(tmpHome, ".cnap")
+	assert.Equal(t, filepath.Join(expectedBase, "workspace"), config.BaseDir)
+	assert.Equal(t, filepath.Join(expectedBase, "configs", "opencode", "default-config.json"), config.DefaultConfigPath)
+	assert.Equal(t, filepath.Join(expectedBase, "configs", "opencode", "default-mcp.json"), config.DefaultMCPPath)
 	assert.Equal(t, int64(1024), config.MaxDiskUsageMB)
 }
 

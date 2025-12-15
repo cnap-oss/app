@@ -517,13 +517,13 @@ func (r *Runner) runSync(ctx context.Context, client *OpenCodeClient, req *RunRe
 	// OpenCode Server는 비동기로 동작하므로 즉시 응답이 비어있을 수 있음
 	// 응답의 message ID를 사용하여 완료된 메시지를 폴링
 	messageID := resp.Info.ID
-	
+
 	// 메시지 완료 대기 (최대 60초)
 	var fullMessage *struct {
 		Info  Message `json:"info"`
 		Parts []Part  `json:"parts"`
 	}
-	
+
 	timeout := time.After(60 * time.Second)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -553,7 +553,7 @@ func (r *Runner) runSync(ctx context.Context, client *OpenCodeClient, req *RunRe
 				}
 			}
 		}
-		
+
 		if fullMessage != nil {
 			break
 		}
