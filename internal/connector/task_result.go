@@ -100,8 +100,8 @@ func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 				Value: result.Content,
 			})
 		}
-	} else {
-		// 성공 시 초록색
+	} else if result.Status == "completed" {
+		// 최종 완료 시 초록색
 		embed = &discordgo.MessageEmbed{
 			Title: "✅ Task 실행 완료",
 			Color: 0x00ff00, // 초록색
@@ -123,6 +123,21 @@ func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 				Value: content,
 			})
 		}
+	} else {
+		// 알 수 없는 상태 - 기본 메시지로 처리
+		s.logger.Warn("Unknown status received",
+			zap.String("task_id", result.TaskID),
+			zap.String("status", result.Status),
+		)
+		_, err := s.session.ChannelMessageSend(result.ThreadID, result.Content)
+		if err != nil {
+			s.logger.Error("Failed to send message to Discord",
+				zap.String("task_id", result.TaskID),
+				zap.String("thread_id", result.ThreadID),
+				zap.Error(err),
+			)
+		}
+		return
 	}
 
 	// Discord에 메시지 전송
