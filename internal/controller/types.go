@@ -19,16 +19,15 @@ type ConnectorEvent struct {
 	//   - "cancel": Task 취소
 	//   - "continue": 기존 Task에 메시지 추가 후 실행 계속 (멀티턴 대화)
 	//   - "complete": Task 명시적 완료
-	Type     string
-	TaskID   string
-	ThreadID string // Discord thread ID
-	Prompt   string // 사용자 메시지 (optional)
+	Type      string
+	TaskID    string
+	AgentName string
+	Prompt    string // 사용자 메시지 (optional)
 }
 
 // ControllerEvent는 Controller에서 Connector로 전송되는 이벤트(결과)를 나타냅니다.
 type ControllerEvent struct {
-	TaskID   string
-	ThreadID string
+	TaskID string
 	// Status는 이벤트 상태를 나타냅니다.
 	// 지원 값:
 	//   - "message": 중간 응답 (Runner가 생성한 응답, 실시간 전달용)

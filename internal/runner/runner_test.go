@@ -28,6 +28,7 @@ func TestRunWithResult_Success(t *testing.T) {
 		err := json.NewDecoder(r.Body).Decode(&reqBody)
 		require.NoError(t, err)
 		assert.Equal(t, "grok-code", reqBody.Model)
+		// 전체 메시지 배열이 전달됨
 		assert.Len(t, reqBody.Messages, 1)
 		assert.Equal(t, "user", reqBody.Messages[0].Role)
 		assert.Equal(t, "test prompt", reqBody.Messages[0].Content)
@@ -69,7 +70,9 @@ func TestRunWithResult_Success(t *testing.T) {
 	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
 	ctx := context.Background()
 
-	result, err := runner.Request(ctx, "grok-code", "test-task", "test prompt")
+	result, err := runner.Request(ctx, "grok-code", "test-task", []ChatMessage{
+		{Role: "user", Content: "test prompt"},
+	})
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -105,7 +108,9 @@ func TestRunWithResult_APIError(t *testing.T) {
 	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
 	ctx := context.Background()
 
-	result, err := runner.Request(ctx, "grok-code", "test-task", "test prompt")
+	result, err := runner.Request(ctx, "grok-code", "test-task", []ChatMessage{
+		{Role: "user", Content: "test prompt"},
+	})
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -128,7 +133,9 @@ func TestRunWithResult_HTTPError(t *testing.T) {
 	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
 	ctx := context.Background()
 
-	result, err := runner.Request(ctx, "grok-code", "test-task", "test prompt")
+	result, err := runner.Request(ctx, "grok-code", "test-task", []ChatMessage{
+		{Role: "user", Content: "test prompt"},
+	})
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -152,7 +159,9 @@ func TestRunWithResult_Timeout(t *testing.T) {
 	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL), WithHTTPClient(client))
 	ctx := context.Background()
 
-	result, err := runner.Request(ctx, "grok-code", "test-task", "test prompt")
+	result, err := runner.Request(ctx, "grok-code", "test-task", []ChatMessage{
+		{Role: "user", Content: "test prompt"},
+	})
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -176,7 +185,9 @@ func TestRunWithResult_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	result, err := runner.Request(ctx, "grok-code", "test-task", "test prompt")
+	result, err := runner.Request(ctx, "grok-code", "test-task", []ChatMessage{
+		{Role: "user", Content: "test prompt"},
+	})
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -306,12 +317,13 @@ func TestRun_WithSystemPrompt(t *testing.T) {
 	_, err := runner.Run(ctx, req)
 	require.NoError(t, err)
 
-	// Verify system prompt was NOT included (current implementation uses last user message)
-	// Note: Current implementation in task_runner.go only sends the last user message
-	// not the entire conversation history with system prompt
-	assert.Len(t, receivedMessages, 1)
-	assert.Equal(t, "user", receivedMessages[0].Role)
-	assert.Equal(t, "Hello", receivedMessages[0].Content)
+	// Verify system prompt was included in the messages
+	// Now the implementation sends the entire conversation history with system prompt
+	assert.Len(t, receivedMessages, 2)
+	assert.Equal(t, "system", receivedMessages[0].Role)
+	assert.Equal(t, "You are a helpful assistant", receivedMessages[0].Content)
+	assert.Equal(t, "user", receivedMessages[1].Role)
+	assert.Equal(t, "Hello", receivedMessages[1].Content)
 }
 
 // TestRun_NoUserMessage tests behavior when there's no user message

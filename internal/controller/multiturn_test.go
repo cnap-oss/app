@@ -105,9 +105,8 @@ func TestExecuteEvent(t *testing.T) {
 
 	// execute 이벤트 전송
 	connectorEventChan <- controller.ConnectorEvent{
-		Type:     "execute",
-		TaskID:   threadID,
-		ThreadID: threadID,
+		Type:   "execute",
+		TaskID: threadID,
 	}
 
 	// 상태가 running으로 변경되었는지 확인 (약간의 대기 필요)
@@ -154,9 +153,8 @@ func TestContinueEvent(t *testing.T) {
 
 	// 첫 번째 실행 - execute 이벤트
 	connectorEventChan <- controller.ConnectorEvent{
-		Type:     "execute",
-		TaskID:   threadID,
-		ThreadID: threadID,
+		Type:   "execute",
+		TaskID: threadID,
 	}
 
 	// 실행 시작 대기
@@ -175,9 +173,8 @@ func TestContinueEvent(t *testing.T) {
 
 	// continue 이벤트 전송
 	connectorEventChan <- controller.ConnectorEvent{
-		Type:     "continue",
-		TaskID:   threadID,
-		ThreadID: threadID,
+		Type:   "continue",
+		TaskID: threadID,
 	}
 
 	// 실행 시작 대기
@@ -232,7 +229,6 @@ func TestOnMessageCallback(t *testing.T) {
 	select {
 	case event := <-controllerEventChan:
 		require.Equal(t, taskID, event.TaskID)
-		require.Equal(t, taskID, event.ThreadID, "ThreadID should equal TaskID")
 		require.Equal(t, "message", event.Status)
 		require.Equal(t, testMessage, event.Content)
 	case <-time.After(1 * time.Second):
@@ -276,9 +272,8 @@ func TestCancelEvent(t *testing.T) {
 
 	// execute 이벤트로 Task 시작
 	connectorEventChan <- controller.ConnectorEvent{
-		Type:     "execute",
-		TaskID:   threadID,
-		ThreadID: threadID,
+		Type:   "execute",
+		TaskID: threadID,
 	}
 
 	// 실행 시작 대기
@@ -286,9 +281,8 @@ func TestCancelEvent(t *testing.T) {
 
 	// cancel 이벤트 전송
 	connectorEventChan <- controller.ConnectorEvent{
-		Type:     "cancel",
-		TaskID:   threadID,
-		ThreadID: threadID,
+		Type:   "cancel",
+		TaskID: threadID,
 	}
 
 	// canceled 이벤트 수신 대기
@@ -340,9 +334,8 @@ func TestMultiTurnConversationFlow(t *testing.T) {
 
 	// 3. execute 이벤트로 첫 실행
 	connectorEventChan <- controller.ConnectorEvent{
-		Type:     "execute",
-		TaskID:   threadID,
-		ThreadID: threadID,
+		Type:   "execute",
+		TaskID: threadID,
 	}
 
 	// 실행 시작 대기
@@ -364,9 +357,8 @@ func TestMultiTurnConversationFlow(t *testing.T) {
 
 	// 8. continue 이벤트로 두 번째 실행
 	connectorEventChan <- controller.ConnectorEvent{
-		Type:     "continue",
-		TaskID:   threadID,
-		ThreadID: threadID,
+		Type:   "continue",
+		TaskID: threadID,
 	}
 
 	// 실행 시작 대기
@@ -429,7 +421,7 @@ func TestOnCompleteCallback(t *testing.T) {
 		Output:  "Test output",
 		Error:   nil,
 	}
-	
+
 	// OnComplete 호출 (파일 저장 실패 가능하므로 에러는 무시)
 	_ = ctrl.OnComplete(taskID, result)
 
