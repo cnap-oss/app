@@ -79,6 +79,6 @@ func TestRunner_RealAPI(t *testing.T) {
 	require.NotNil(t, res)
 	require.True(t, res.Success)
 	require.NotEmpty(t, res.Output)
-	
+
 	fmt.Printf("agent=%s name=%s success=%v output=%q\n", res.Agent, res.Name, res.Success, res.Output)
 }
