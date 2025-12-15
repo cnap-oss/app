@@ -412,44 +412,140 @@ func (r *Runner) waitForHealthy(ctx context.Context) error {
 var _ TaskRunner = (*Runner)(nil)
 
 // Run implements TaskRunner interface.
-// Phase 1에서는 레거시 OpenCode API를 사용하며, Phase 2에서 Container 기반으로 전환됩니다.
 func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
-	// Container 기반 실행 준비 (Phase 2에서 활성화)
-	if r.ContainerID != "" && r.Status == RunnerStatusReady {
-		// Phase 2: Container 내 OpenCode Server로 요청
-		// TODO: Phase 2에서 구현
-		r.logger.Info("Container-based execution will be implemented in Phase 2",
-			zap.String("runner_id", r.ID),
-			zap.String("container_id", r.ContainerID),
-		)
+	if r.Status != RunnerStatusReady {
+		return nil, fmt.Errorf("runner가 준비되지 않음 (status: %s)", r.Status)
 	}
 
-	// Phase 1: 레거시 OpenCode API 사용 (기존 동작 유지)
-	r.logger.Info("Runner starting task (legacy mode)", zap.String("messages", fmt.Sprintf("%+v", req.Messages)))
-	// 시스템 프롬프트와 메시지를 결합
+	r.Status = RunnerStatusRunning
+	defer func() {
+		r.Status = RunnerStatusReady
+	}()
+
+	r.logger.Info("Runner executing task",
+		zap.String("runner_id", r.ID),
+		zap.String("task_id", req.TaskID),
+		zap.Int("message_count", len(req.Messages)),
+	)
+
+	// OpenCode API 클라이언트 생성
+	apiClient := NewOpenCodeClient(
+		r.BaseURL,
+		WithOpenCodeHTTPClient(r.httpClient),
+		WithOpenCodeLogger(r.logger),
+	)
+
+	// 시스템 프롬프트와 메시지 결합
+	messages := r.buildMessages(req)
+
+	// 콜백이 있으면 스트리밍 모드 사용
+	if req.Callback != nil {
+		return r.runWithStreaming(ctx, apiClient, req, messages)
+	}
+
+	// 일반 모드
+	return r.runSync(ctx, apiClient, req, messages)
+}
+
+// buildMessages는 요청 메시지를 구성합니다.
+func (r *Runner) buildMessages(req *RunRequest) []ChatMessage {
 	messages := make([]ChatMessage, 0, len(req.Messages)+1)
+
+	// 시스템 프롬프트 추가
 	if req.SystemPrompt != "" {
 		messages = append(messages, ChatMessage{
 			Role:    "system",
 			Content: req.SystemPrompt,
 		})
 	}
+
+	// 기존 메시지 추가
 	messages = append(messages, req.Messages...)
 
-	// API 호출 - 전체 메시지 배열 전달
-	result, err := r.Request(ctx, req.Model, req.TaskID, messages)
+	return messages
+}
+
+// runSync는 동기 모드로 실행합니다.
+func (r *Runner) runSync(ctx context.Context, client *OpenCodeClient, req *RunRequest, messages []ChatMessage) (*RunResult, error) {
+	chatReq := &ChatRequest{
+		Model:    req.Model,
+		Messages: messages,
+		Stream:   false,
+	}
+
+	resp, err := client.Chat(ctx, chatReq)
 	if err != nil {
-		// 콜백이 있으면 에러 알림
+		return nil, fmt.Errorf("chat API 호출 실패: %w", err)
+	}
+
+	return &RunResult{
+		Agent:   resp.Model,
+		Name:    req.TaskID,
+		Success: true,
+		Output:  resp.Response.Content,
+		Error:   nil,
+	}, nil
+}
+
+// runWithStreaming는 스트리밍 모드로 실행합니다.
+func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, req *RunRequest, messages []ChatMessage) (*RunResult, error) {
+	chatReq := &ChatRequest{
+		Model:    req.Model,
+		Messages: messages,
+		Stream:   true,
+	}
+
+	var fullContent strings.Builder
+	var lastModel string
+
+	handler := func(event *ChatStreamEvent) error {
+		switch event.Event {
+		case "message":
+			// 부분 응답 처리
+			if event.Data.Content != "" {
+				fullContent.WriteString(event.Data.Content)
+
+				// 콜백으로 중간 응답 전달
+				if err := req.Callback.OnMessage(req.TaskID, event.Data.Content); err != nil {
+					r.logger.Warn("콜백 전달 실패",
+						zap.String("task_id", req.TaskID),
+						zap.Error(err),
+					)
+				}
+			}
+		case "done":
+			// 완료 처리
+			r.logger.Debug("스트리밍 완료",
+				zap.String("task_id", req.TaskID),
+				zap.String("finish_reason", event.Data.FinishReason),
+			)
+		case "error":
+			return fmt.Errorf("스트리밍 에러: %s", event.Data.Error)
+		}
+		return nil
+	}
+
+	err := client.ChatStream(ctx, chatReq, handler)
+	if err != nil {
+		// 에러 콜백
 		if req.Callback != nil {
 			_ = req.Callback.OnError(req.TaskID, err)
 		}
-		return nil, err
+		return nil, fmt.Errorf("chat stream 실패: %w", err)
 	}
 
-	// AI 응답 수신 완료 - 콜백으로 중간 응답 전달
-	if req.Callback != nil && result.Success && result.Output != "" {
-		if err := req.Callback.OnMessage(req.TaskID, result.Output); err != nil {
-			r.logger.Warn("Failed to send message callback",
+	result := &RunResult{
+		Agent:   lastModel,
+		Name:    req.TaskID,
+		Success: true,
+		Output:  fullContent.String(),
+		Error:   nil,
+	}
+
+	// 완료 콜백
+	if req.Callback != nil {
+		if err := req.Callback.OnComplete(req.TaskID, result); err != nil {
+			r.logger.Warn("완료 콜백 실패",
 				zap.String("task_id", req.TaskID),
 				zap.Error(err),
 			)
