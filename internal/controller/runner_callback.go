@@ -24,7 +24,7 @@ func (c *Controller) OnStarted(taskID string, sessionID string) error {
 // OnMessage는 Runner가 중간 응답을 생성할 때 호출됩니다.
 // 이를 통해 Connector에 실시간으로 메시지를 전달합니다.
 func (c *Controller) OnMessage(taskID string, msg *taskrunner.RunnerMessage) error {
-	c.logger.Debug("OnMessage callback",
+	c.logger.Info("OnMessage callback",
 		zap.String("task_id", taskID),
 		zap.String("message_type", string(msg.Type)),
 		zap.Int("content_length", len(msg.Content)),

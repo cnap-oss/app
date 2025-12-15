@@ -209,6 +209,28 @@ func (c *OpenCodeClient) Prompt(ctx context.Context, sessionID string, req *Prom
 	return &result, nil
 }
 
+// PromptAsync는 메시지를 비동기적으로 전송합니다.
+func (c *OpenCodeClient) PromptAsync(ctx context.Context, sessionID string, req *PromptRequest) error {
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/session/%s/prompt_async", sessionID), req)
+	if err != nil {
+		// 204 No Content는 성공으로 간주
+		if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == http.StatusNoContent {
+			c.logger.Info("비동기 프롬프트 전송 성공 (204 No Content)",
+				zap.String("session_id", sessionID),
+			)
+			return nil
+		}
+		return err
+	}
+	defer resp.Body.Close()
+
+	c.logger.Info("비동기 프롬프트 전송 성공",
+		zap.String("session_id", sessionID),
+	)
+
+	return nil
+}
+
 // GetMessages는 세션의 모든 메시지를 조회합니다.
 func (c *OpenCodeClient) GetMessages(ctx context.Context, sessionID string, limit *int) ([]struct {
 	Info  Message `json:"info"`
