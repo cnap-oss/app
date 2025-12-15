@@ -81,23 +81,23 @@ func (c *OpenCodeClient) Health(ctx context.Context) (*HealthResponse, error) {
 
 // CreateSession은 새 세션을 생성합니다.
 func (c *OpenCodeClient) CreateSession(ctx context.Context, req *CreateSessionRequest) (*Session, error) {
-	resp, err := c.doRequest(ctx, http.MethodPost, "/api/sessions", req)
+	resp, err := c.doRequest(ctx, http.MethodPost, "/session", req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var result CreateSessionResponse
+	var result Session
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
 	}
 
-	return &result.Session, nil
+	return &result, nil
 }
 
 // GetSession은 세션 정보를 조회합니다.
 func (c *OpenCodeClient) GetSession(ctx context.Context, sessionID string) (*Session, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/api/sessions/"+sessionID, nil)
+	resp, err := c.doRequest(ctx, http.MethodGet, "/session/"+sessionID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (c *OpenCodeClient) GetSession(ctx context.Context, sessionID string) (*Ses
 
 // DeleteSession은 세션을 종료합니다.
 func (c *OpenCodeClient) DeleteSession(ctx context.Context, sessionID string) error {
-	resp, err := c.doRequest(ctx, http.MethodDelete, "/api/sessions/"+sessionID, nil)
+	resp, err := c.doRequest(ctx, http.MethodDelete, "/session/"+sessionID, nil)
 	if err != nil {
 		return err
 	}
@@ -128,20 +128,63 @@ func (c *OpenCodeClient) DeleteSession(ctx context.Context, sessionID string) er
 
 // Chat은 메시지를 전송하고 응답을 수신합니다.
 func (c *OpenCodeClient) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	req.Stream = false // 스트리밍 비활성화
+	// 1. 세션 생성
+	session, err := c.CreateSession(ctx, &CreateSessionRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("세션 생성 실패: %w", err)
+	}
 
-	resp, err := c.doRequest(ctx, http.MethodPost, "/api/chat", req)
+	// 2. 메시지 전송
+	messageReq := map[string]interface{}{
+		"model": map[string]string{
+			"providerID": "opencode", // 기본 provider
+			"modelID":    req.Model,
+		},
+		"parts": []map[string]interface{}{},
+	}
+
+	// 메시지 변환
+	for _, msg := range req.Messages {
+		part := map[string]interface{}{
+			"type": "text",
+			"text": msg.Content,
+		}
+		messageReq["parts"] = append(messageReq["parts"].([]map[string]interface{}), part)
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/session/%s/message", session.ID), messageReq)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var result ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	// 응답 파싱
+	var messageResp map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&messageResp); err != nil {
 		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
 	}
 
-	return &result, nil
+	// parts에서 텍스트 추출
+	var content string
+	if parts, ok := messageResp["parts"].([]interface{}); ok {
+		for _, part := range parts {
+			if partMap, ok := part.(map[string]interface{}); ok {
+				if partType, ok := partMap["type"].(string); ok && partType == "text" {
+					if text, ok := partMap["text"].(string); ok {
+						content += text
+					}
+				}
+			}
+		}
+	}
+
+	return &ChatResponse{
+		Model: req.Model,
+		Response: ChatMessage{
+			Role:    "assistant",
+			Content: content,
+		},
+	}, nil
 }
 
 // ChatStreamHandler는 스트리밍 이벤트 핸들러입니다.
