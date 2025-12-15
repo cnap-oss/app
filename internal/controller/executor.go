@@ -424,6 +424,6 @@ func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID
 		}
 	}
 
-	// Runner 정리
-	c.runnerManager.DeleteRunner(taskID)
+	// Runner 삭제하지 않음 - Task가 waiting 상태이므로 Runner 유지
+	// c.runnerManager.DeleteRunner(taskID)  // Phase 2: 명시적 완료 시에만 삭제
 }
