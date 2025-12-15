@@ -65,7 +65,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.logger.Info("Bot is now running.")
 
 	// 결과 핸들러 goroutine 시작
-	go s.resultHandler(ctx)
+	go s.controllerEventHandler(ctx)
 
 	// 컨텍스트가 취소될 때까지 대기
 	<-ctx.Done()

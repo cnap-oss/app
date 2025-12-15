@@ -8,8 +8,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// resultHandler는 Task 실행 결과를 처리하는 goroutine입니다.
-func (s *Server) resultHandler(ctx context.Context) {
+// controllerEventHandler는 Task 실행 결과를 처리하는 goroutine입니다.
+func (s *Server) controllerEventHandler(ctx context.Context) {
 	s.logger.Info("Result handler started")
 	defer s.logger.Info("Result handler stopped")
 
@@ -21,12 +21,48 @@ func (s *Server) resultHandler(ctx context.Context) {
 				zap.String("thread_id", result.ThreadID),
 				zap.String("status", result.Status),
 			)
-			s.sendResultToDiscord(result)
+			switch result.Status {
+			case "message":
+				s.sendMessageToDiscord(result)
+			case "completed", "failed", "canceled":
+				s.sendResultToDiscord(result)
+			default:
+				s.logger.Warn("Unknown controller event status",
+					zap.String("task_id", result.TaskID),
+					zap.String("status", result.Status),
+				)
+			}
 
 		case <-ctx.Done():
 			s.logger.Info("Result handler shutting down")
 			return
 		}
+	}
+}
+
+func (s *Server) sendMessageToDiscord(result controller.ControllerEvent) {
+	if result.ThreadID == "" {
+		s.logger.Warn("Thread ID is empty, cannot send result",
+			zap.String("task_id", result.TaskID),
+		)
+		return
+	}
+
+	content := result.Content
+
+	// 일반 메시지로 전송 (Embed 없이)
+	_, err := s.session.ChannelMessageSend(result.ThreadID, content)
+	if err != nil {
+		s.logger.Error("Failed to send message to Discord",
+			zap.String("task_id", result.TaskID),
+			zap.String("thread_id", result.ThreadID),
+			zap.Error(err),
+		)
+	} else {
+		s.logger.Debug("Message sent to Discord",
+			zap.String("task_id", result.TaskID),
+			zap.String("thread_id", result.ThreadID),
+		)
 	}
 }
 
@@ -36,30 +72,6 @@ func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 		s.logger.Warn("Thread ID is empty, cannot send result",
 			zap.String("task_id", result.TaskID),
 		)
-		return
-	}
-
-	// message 상태는 중간 응답이므로 간단한 메시지로 처리
-	if result.Status == "message" {
-		content := result.Content
-		if len(content) > 2000 {
-			content = content[:2000] + "...\n(메시지가 너무 길어 잘렸습니다)"
-		}
-
-		// 일반 메시지로 전송 (Embed 없이)
-		_, err := s.session.ChannelMessageSend(result.ThreadID, content)
-		if err != nil {
-			s.logger.Error("Failed to send message to Discord",
-				zap.String("task_id", result.TaskID),
-				zap.String("thread_id", result.ThreadID),
-				zap.Error(err),
-			)
-		} else {
-			s.logger.Debug("Message sent to Discord",
-				zap.String("task_id", result.TaskID),
-				zap.String("thread_id", result.ThreadID),
-			)
-		}
 		return
 	}
 
@@ -113,9 +125,6 @@ func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 
 		// 결과 내용 추가 (너무 길면 잘라내기)
 		content := result.Content
-		if len(content) > 1000 {
-			content = content[:1000] + "...\n(결과가 너무 길어 잘렸습니다)"
-		}
 
 		if content != "" {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
