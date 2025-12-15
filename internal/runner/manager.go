@@ -10,10 +10,11 @@ import (
 
 // RunnerManager manages Runner instances.
 type RunnerManager struct {
-	runners      map[string]*Runner
-	dockerClient DockerClient
-	mu           sync.RWMutex
-	logger       *zap.Logger
+	runners          map[string]*Runner
+	dockerClient     DockerClient
+	lifecycleManager LifecycleManager
+	mu               sync.RWMutex
+	logger           *zap.Logger
 }
 
 // RunnerManagerOption은 RunnerManager 옵션입니다.
@@ -30,6 +31,13 @@ func WithDockerClientOption(client DockerClient) RunnerManagerOption {
 func WithLogger(logger *zap.Logger) RunnerManagerOption {
 	return func(rm *RunnerManager) {
 		rm.logger = logger
+	}
+}
+
+// WithLifecycleManagerOption은 LifecycleManager를 주입합니다.
+func WithLifecycleManagerOption(lm LifecycleManager) RunnerManagerOption {
+	return func(rm *RunnerManager) {
+		rm.lifecycleManager = lm
 	}
 }
 
@@ -58,8 +66,37 @@ func GetRunnerManager(opts ...RunnerManagerOption) *RunnerManager {
 			}
 			instance.dockerClient = client
 		}
+
+		// LifecycleManager가 설정되지 않았으면 새로 생성
+		if instance.lifecycleManager == nil {
+			instance.lifecycleManager = NewLifecycleManager(instance.logger)
+		}
 	})
 	return instance
+}
+
+// Start는 RunnerManager를 시작합니다.
+func (rm *RunnerManager) Start(ctx context.Context) error {
+	// 수명 관리자 시작
+	if rm.lifecycleManager != nil {
+		if err := rm.lifecycleManager.Start(ctx); err != nil {
+			return fmt.Errorf("수명 관리자 시작 실패: %w", err)
+		}
+	}
+	return nil
+}
+
+// Stop은 RunnerManager를 중지합니다.
+func (rm *RunnerManager) Stop(ctx context.Context) error {
+	// 수명 관리자 중지
+	if rm.lifecycleManager != nil {
+		if err := rm.lifecycleManager.Stop(ctx); err != nil {
+			rm.logger.Warn("수명 관리자 중지 중 오류", zap.Error(err))
+		}
+	}
+
+	// 모든 Runner 정리
+	return rm.Cleanup(ctx)
 }
 
 // CreateRunner creates a new Runner and adds it to the manager.
@@ -87,6 +124,15 @@ func (rm *RunnerManager) CreateRunner(ctx context.Context, taskID string, agentI
 	}
 
 	rm.runners[taskID] = runner
+
+	// 수명 관리자에 등록
+	if rm.lifecycleManager != nil {
+		if err := rm.lifecycleManager.RegisterRunner(runner); err != nil {
+			delete(rm.runners, taskID)
+			return nil, fmt.Errorf("수명 관리자 등록 실패: %w", err)
+		}
+	}
+
 	return runner, nil
 }
 
@@ -135,6 +181,11 @@ func (rm *RunnerManager) DeleteRunner(ctx context.Context, taskID string) error 
 		return nil
 	}
 
+	// 수명 관리자에서 제거
+	if rm.lifecycleManager != nil {
+		_ = rm.lifecycleManager.UnregisterRunner(taskID)
+	}
+
 	// Container 중지
 	if err := runner.Stop(ctx); err != nil {
 		rm.logger.Warn("Runner 중지 중 오류",
@@ -145,6 +196,23 @@ func (rm *RunnerManager) DeleteRunner(ctx context.Context, taskID string) error 
 
 	delete(rm.runners, taskID)
 	return nil
+}
+
+// NotifyRunnerActivity는 Runner 활동을 알립니다.
+func (rm *RunnerManager) NotifyRunnerActivity(taskID string) {
+	if rm.lifecycleManager != nil {
+		rm.lifecycleManager.NotifyActivity(taskID)
+	}
+}
+
+// GetStats는 Runner 통계를 반환합니다.
+func (rm *RunnerManager) GetStats() *LifecycleStats {
+	if rm.lifecycleManager != nil {
+		return rm.lifecycleManager.GetRunnerStats()
+	}
+	return &LifecycleStats{
+		TotalRunners: len(rm.runners),
+	}
 }
 
 // Cleanup은 모든 Runner를 정리합니다. (종료 시 호출)
