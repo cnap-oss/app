@@ -329,7 +329,7 @@ func TestSettingsManager_AllAPIKeys(t *testing.T) {
 	}
 
 	for key, val := range apiKeys {
-		os.Setenv(key, val)
+		_ = os.Setenv(key, val)
 		defer os.Unsetenv(key)
 	}
 
