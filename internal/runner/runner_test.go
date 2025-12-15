@@ -203,43 +203,31 @@ func TestRunWithResult_ContextCancellation(t *testing.T) {
 func TestRun_Success(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
-	// Mock server that returns successful response
+	// Mock server that returns successful response from new API
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := OpenCodeResponse{
-			ID:      "test-id",
-			Object:  "chat.completion",
-			Created: time.Now().Unix(),
-			Model:   "grok-code",
-			Choices: []struct {
-				Index   int `json:"index"`
-				Message struct {
-					Role    string `json:"role"`
-					Content string `json:"content"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason"`
-			}{
-				{
-					Index: 0,
-					Message: struct {
-						Role    string `json:"role"`
-						Content string `json:"content"`
-					}{
-						Role:    "assistant",
-						Content: "test response",
-					},
-					FinishReason: "stop",
-				},
-			},
-		}
+		if r.URL.Path == "/api/chat" {
+			// New OpenCode API format
+			resp := ChatResponse{
+				ID:    "test-id",
+				Model: "grok-code",
+			}
+			resp.Response.Role = "assistant"
+			resp.Response.Content = "test response"
+			resp.FinishReason = "stop"
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(resp)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(resp)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 
 	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
 	require.NoError(t, err)
+	runner.Status = RunnerStatusReady // Set status to ready for Phase 2 implementation
+	runner.BaseURL = server.URL       // Set BaseURL for API client
 	ctx := context.Background()
 
 	req := &RunRequest{
@@ -271,45 +259,32 @@ func TestRun_WithSystemPrompt(t *testing.T) {
 	var receivedMessages []ChatMessage
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var reqBody OpenCodeRequest
-		_ = json.NewDecoder(r.Body).Decode(&reqBody)
-		receivedMessages = reqBody.Messages
+		if r.URL.Path == "/api/chat" {
+			var reqBody ChatRequest
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			receivedMessages = reqBody.Messages
 
-		resp := OpenCodeResponse{
-			ID:      "test-id",
-			Object:  "chat.completion",
-			Created: time.Now().Unix(),
-			Model:   "grok-code",
-			Choices: []struct {
-				Index   int `json:"index"`
-				Message struct {
-					Role    string `json:"role"`
-					Content string `json:"content"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason"`
-			}{
-				{
-					Index: 0,
-					Message: struct {
-						Role    string `json:"role"`
-						Content string `json:"content"`
-					}{
-						Role:    "assistant",
-						Content: "response",
-					},
-					FinishReason: "stop",
-				},
-			},
+			resp := ChatResponse{
+				ID:    "test-id",
+				Model: "grok-code",
+			}
+			resp.Response.Role = "assistant"
+			resp.Response.Content = "response"
+			resp.FinishReason = "stop"
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(resp)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
 	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
 	require.NoError(t, err)
+	runner.Status = RunnerStatusReady // Set status to ready for Phase 2 implementation
+	runner.BaseURL = server.URL       // Set BaseURL for API client
 	ctx := context.Background()
 
 	req := &RunRequest{
@@ -338,41 +313,28 @@ func TestRun_NoUserMessage(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := OpenCodeResponse{
-			ID:      "test-id",
-			Object:  "chat.completion",
-			Created: time.Now().Unix(),
-			Model:   "grok-code",
-			Choices: []struct {
-				Index   int `json:"index"`
-				Message struct {
-					Role    string `json:"role"`
-					Content string `json:"content"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason"`
-			}{
-				{
-					Index: 0,
-					Message: struct {
-						Role    string `json:"role"`
-						Content string `json:"content"`
-					}{
-						Role:    "assistant",
-						Content: "response",
-					},
-					FinishReason: "stop",
-				},
-			},
-		}
+		if r.URL.Path == "/api/chat" {
+			resp := ChatResponse{
+				ID:    "test-id",
+				Model: "grok-code",
+			}
+			resp.Response.Role = "assistant"
+			resp.Response.Content = "response"
+			resp.FinishReason = "stop"
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(resp)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(resp)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 
 	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
 	require.NoError(t, err)
+	runner.Status = RunnerStatusReady // Set status to ready for Phase 2 implementation
+	runner.BaseURL = server.URL       // Set BaseURL for API client
 	ctx := context.Background()
 
 	req := &RunRequest{
