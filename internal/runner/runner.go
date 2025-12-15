@@ -41,12 +41,12 @@ type AgentInfo struct {
 
 // StatusCallback은 Task 실행 중 상태 변경을 Controller에 알리기 위한 콜백 인터페이스입니다.
 type StatusCallback interface {
-	// OnStatusChange는 Task 상태가 변경될 때 호출됩니다.
-	OnStatusChange(taskID string, status string) error
+	// OnStarted는 Runner가 시작되고 세션이 생성될 때 호출됩니다.
+	OnStarted(taskID string, sessionID string) error
 
 	// OnMessage는 Runner가 중간 응답을 생성할 때 호출됩니다.
 	// 이를 통해 Controller가 Connector에 실시간으로 메시지를 전달할 수 있습니다.
-	OnMessage(taskID string, message string) error
+	OnMessage(taskID string, msg *RunnerMessage) error
 
 	// OnComplete는 Task가 완료될 때 호출됩니다.
 	OnComplete(taskID string, result *RunResult) error
@@ -618,7 +618,13 @@ func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, r
 
 							// 콜백으로 중간 응답 전달
 							if req.Callback != nil {
-								if err := req.Callback.OnMessage(req.TaskID, text); err != nil {
+								msg := &RunnerMessage{
+									Type:      MessageTypeText,
+									Timestamp: time.Now(),
+									Content:   text,
+									RawEvent:  event,
+								}
+								if err := req.Callback.OnMessage(req.TaskID, msg); err != nil {
 									r.logger.Warn("콜백 전달 실패",
 										zap.String("task_id", req.TaskID),
 										zap.Error(err),

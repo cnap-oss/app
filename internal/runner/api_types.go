@@ -1,5 +1,90 @@
 package taskrunner
 
+import "time"
+
+// ======================================
+// Runner Message Types (Phase 1)
+// ======================================
+
+// RunnerMessageType SSE 이벤트의 타입을 나타내는 상수
+type RunnerMessageType string
+
+const (
+	// 텍스트 관련
+	MessageTypeText      RunnerMessageType = "text"
+	MessageTypeReasoning RunnerMessageType = "reasoning"
+
+	// 도구 관련
+	MessageTypeToolCall   RunnerMessageType = "tool_call"
+	MessageTypeToolResult RunnerMessageType = "tool_result"
+
+	// 상태 관련
+	MessageTypeStatus   RunnerMessageType = "status"
+	MessageTypeProgress RunnerMessageType = "progress"
+
+	// 완료 관련
+	MessageTypeComplete RunnerMessageType = "complete"
+	MessageTypeError    RunnerMessageType = "error"
+
+	// 세션 관련
+	MessageTypeSessionCreated RunnerMessageType = "session_created"
+	MessageTypeSessionAborted RunnerMessageType = "session_aborted"
+)
+
+// RunnerMessage SSE 이벤트를 추상화한 메시지 구조체
+type RunnerMessage struct {
+	Type       RunnerMessageType `json:"type"`
+	SessionID  string            `json:"session_id,omitempty"`
+	MessageID  string            `json:"message_id,omitempty"`
+	PartID     string            `json:"part_id,omitempty"`
+	Timestamp  time.Time         `json:"timestamp"`
+	Content    string            `json:"content,omitempty"`
+	ToolCall   *ToolCallInfo     `json:"tool_call,omitempty"`
+	ToolResult *ToolResultInfo   `json:"tool_result,omitempty"`
+	Status     string            `json:"status,omitempty"`
+	Progress   float64           `json:"progress,omitempty"`
+	Error      *MessageErrorInfo `json:"error,omitempty"`
+	Metadata   map[string]any    `json:"metadata,omitempty"`
+	RawEvent   *Event            `json:"raw_event,omitempty"`
+}
+
+// ToolCallInfo 도구 호출 정보
+type ToolCallInfo struct {
+	ToolID    string         `json:"tool_id"`
+	ToolName  string         `json:"tool_name"`
+	Arguments map[string]any `json:"arguments,omitempty"`
+}
+
+// ToolResultInfo 도구 결과 정보
+type ToolResultInfo struct {
+	ToolID   string `json:"tool_id"`
+	ToolName string `json:"tool_name"`
+	Result   string `json:"result"`
+	IsError  bool   `json:"is_error"`
+}
+
+// MessageErrorInfo 메시지 에러 정보
+type MessageErrorInfo struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details any    `json:"details,omitempty"`
+}
+
+// IsText는 메시지가 텍스트 유형인지 확인합니다.
+func (m *RunnerMessage) IsText() bool {
+	return m.Type == MessageTypeText || m.Type == MessageTypeReasoning
+}
+
+// IsToolRelated는 메시지가 도구 관련 유형인지 확인합니다.
+func (m *RunnerMessage) IsToolRelated() bool {
+	return m.Type == MessageTypeToolCall || m.Type == MessageTypeToolResult
+}
+
+// IsTerminal은 메시지가 종료 유형인지 확인합니다.
+func (m *RunnerMessage) IsTerminal() bool {
+	return m.Type == MessageTypeComplete || m.Type == MessageTypeError || m.Type == MessageTypeSessionAborted
+}
+
 // ======================================
 // Session Management
 // ======================================

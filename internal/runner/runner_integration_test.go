@@ -28,10 +28,11 @@ func init() {
 // mockCallback은 테스트용 콜백 구현입니다.
 type mockCallback struct {
 	mu               sync.Mutex
-	statusChanges    []string
+	sessionID        string
 	messages         []string
 	completeResult   *RunResult
 	error            error
+	onStartedCalled  int
 	onMessageCalled  int
 	onCompleteCalled int
 	onErrorCalled    int
@@ -42,20 +43,22 @@ func newMockCallback(t *testing.T) *mockCallback {
 	return &mockCallback{t: t}
 }
 
-func (m *mockCallback) OnStatusChange(taskID string, status string) error {
+func (m *mockCallback) OnStarted(taskID string, sessionID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.statusChanges = append(m.statusChanges, status)
-	m.t.Logf("[Callback] OnStatusChange: taskID=%s, status=%s", taskID, status)
+	m.sessionID = sessionID
+	m.onStartedCalled++
+	m.t.Logf("[Callback] OnStarted: taskID=%s, sessionID=%s", taskID, sessionID)
 	return nil
 }
 
-func (m *mockCallback) OnMessage(taskID string, message string) error {
+func (m *mockCallback) OnMessage(taskID string, msg *RunnerMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.messages = append(m.messages, message)
+	m.messages = append(m.messages, msg.Content)
 	m.onMessageCalled++
-	m.t.Logf("[Callback] OnMessage #%d: taskID=%s, message_length=%d", m.onMessageCalled, taskID, len(message))
+	m.t.Logf("[Callback] OnMessage #%d: taskID=%s, messageType=%s, content_length=%d",
+		m.onMessageCalled, taskID, msg.Type, len(msg.Content))
 	return nil
 }
 

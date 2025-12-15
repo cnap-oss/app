@@ -226,7 +226,12 @@ func TestOnMessageCallback(t *testing.T) {
 
 	// OnMessage 콜백 호출 (Runner가 중간 응답 생성 시 호출하는 것을 시뮬레이션)
 	testMessage := "This is a test message from AI"
-	err = ctrl.OnMessage(taskID, testMessage)
+	msg := &taskrunner.RunnerMessage{
+		Type:      taskrunner.MessageTypeText,
+		Timestamp: time.Now(),
+		Content:   testMessage,
+	}
+	err = ctrl.OnMessage(taskID, msg)
 	require.NoError(t, err)
 
 	// ControllerEvent 채널에서 이벤트 수신
