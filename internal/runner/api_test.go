@@ -20,7 +20,7 @@ func TestOpenCodeClient_Health(t *testing.T) {
 			Status:  "ok",
 			Version: "1.0.0",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -49,7 +49,7 @@ func TestOpenCodeClient_CreateSession(t *testing.T) {
 				Status: "active",
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -74,7 +74,7 @@ func TestOpenCodeClient_GetSession(t *testing.T) {
 			Model:  "gpt-4",
 			Status: "active",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -119,7 +119,7 @@ func TestOpenCodeClient_Chat(t *testing.T) {
 		resp.Response.Role = "assistant"
 		resp.Response.Content = "Hello! How can I help you?"
 		resp.FinishReason = "stop"
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -152,7 +152,7 @@ func TestOpenCodeClient_ChatStream(t *testing.T) {
 		}
 
 		for _, event := range events {
-			w.Write([]byte(event + "\n\n"))
+			_, _ = w.Write([]byte(event + "\n\n"))
 			w.(http.Flusher).Flush()
 		}
 	}))
@@ -178,7 +178,7 @@ func TestOpenCodeClient_ChatStream(t *testing.T) {
 func TestOpenCodeClient_ErrorHandling(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(APIError{
+		_ = json.NewEncoder(w).Encode(APIError{
 			Error: struct {
 				Type    string `json:"type"`
 				Message string `json:"message"`
@@ -232,7 +232,7 @@ func TestOpenCodeClient_StreamContextCancellation(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 
 		// Send one event
-		w.Write([]byte(`data: {"event":"message","data":{"content":"Hello"}}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"event":"message","data":{"content":"Hello"}}` + "\n\n"))
 		w.(http.Flusher).Flush()
 
 		// Wait indefinitely

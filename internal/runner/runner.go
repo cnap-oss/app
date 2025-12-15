@@ -396,7 +396,7 @@ func (r *Runner) waitForHealthy(ctx context.Context) error {
 
 		resp, err := r.httpClient.Get(healthURL)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}

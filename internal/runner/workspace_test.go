@@ -294,7 +294,7 @@ func Test_getEnvOrDefault(t *testing.T) {
 	assert.Equal(t, "default", val)
 
 	// 환경 변수가 있을 때
-	os.Setenv("TEST_VAR", "custom")
+	_ = os.Setenv("TEST_VAR", "custom")
 	defer os.Unsetenv("TEST_VAR")
 
 	val = getEnvOrDefault("TEST_VAR", "default")
@@ -307,14 +307,14 @@ func Test_getEnvOrDefaultInt64(t *testing.T) {
 	assert.Equal(t, int64(100), val)
 
 	// 환경 변수가 있을 때
-	os.Setenv("TEST_INT_VAR", "200")
+	_ = os.Setenv("TEST_INT_VAR", "200")
 	defer os.Unsetenv("TEST_INT_VAR")
 
 	val = getEnvOrDefaultInt64("TEST_INT_VAR", 100)
 	assert.Equal(t, int64(200), val)
 
 	// 유효하지 않은 값일 때
-	os.Setenv("TEST_INVALID_VAR", "invalid")
+	_ = os.Setenv("TEST_INVALID_VAR", "invalid")
 	defer os.Unsetenv("TEST_INVALID_VAR")
 
 	val = getEnvOrDefaultInt64("TEST_INVALID_VAR", 100)

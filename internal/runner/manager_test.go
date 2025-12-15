@@ -3,7 +3,6 @@ package taskrunner
 import (
 	"context"
 	"fmt"
-	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,45 +16,6 @@ func mockAgentInfo() AgentInfo {
 		Model:   "grok-code",
 		Prompt:  "test prompt",
 	}
-}
-
-// mockDockerClient is a mock DockerClient for testing.
-type mockDockerClient struct{}
-
-func (m *mockDockerClient) CreateContainer(ctx context.Context, config ContainerConfig) (string, error) {
-	return "mock-container-id", nil
-}
-
-func (m *mockDockerClient) StartContainer(ctx context.Context, containerID string) error {
-	return nil
-}
-
-func (m *mockDockerClient) StopContainer(ctx context.Context, containerID string, timeout int) error {
-	return nil
-}
-
-func (m *mockDockerClient) RemoveContainer(ctx context.Context, containerID string) error {
-	return nil
-}
-
-func (m *mockDockerClient) ContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
-	return nil, nil
-}
-
-func (m *mockDockerClient) ContainerInspect(ctx context.Context, containerID string) (ContainerInfo, error) {
-	return ContainerInfo{
-		ID:    containerID,
-		State: "running",
-		Ports: map[string]string{"3000/tcp": "8080"},
-	}, nil
-}
-
-func (m *mockDockerClient) Ping(ctx context.Context) error {
-	return nil
-}
-
-func (m *mockDockerClient) Close() error {
-	return nil
 }
 
 func TestRunnerManager_Singleton(t *testing.T) {
