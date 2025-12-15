@@ -6,7 +6,9 @@ import "time"
 // Runner Message Types (Phase 1)
 // ======================================
 
-// RunnerMessageType SSE 이벤트의 타입을 나타내는 상수
+// RunnerMessageType은 SSE 이벤트의 타입을 나타내는 열거형입니다.
+// Controller는 이 타입을 통해 Runner로부터 받은 메시지의 종류를 식별하고
+// 적절한 처리를 수행할 수 있습니다.
 type RunnerMessageType string
 
 const (
@@ -31,7 +33,26 @@ const (
 	MessageTypeSessionAborted RunnerMessageType = "session_aborted"
 )
 
-// RunnerMessage SSE 이벤트를 추상화한 메시지 구조체
+// RunnerMessage는 OpenCode SSE 이벤트를 추상화한 메시지 구조체입니다.
+//
+// Runner는 OpenCode API로부터 수신한 원시 SSE 이벤트를 이 구조체로 변환하여
+// Controller에 전달합니다. 이를 통해 Controller는 이벤트의 타입을 명확히 파악하고
+// 타입 안전하게 처리할 수 있습니다.
+//
+// 주요 필드 사용 패턴:
+//   - Type: 항상 설정됨 (메시지 종류 식별)
+//   - Content: Text/Reasoning 타입일 때 설정 (스트리밍 텍스트)
+//   - ToolCall: ToolCall 타입일 때 설정 (도구 호출 정보)
+//   - ToolResult: ToolResult 타입일 때 설정 (도구 실행 결과)
+//   - Error: Error 타입일 때 설정 (에러 정보)
+//
+// 헬퍼 메서드를 사용한 타입 검사 예시:
+//
+//	if msg.IsText() {
+//	    // Content 필드 사용
+//	} else if msg.IsToolRelated() {
+//	    // ToolCall 또는 ToolResult 필드 사용
+//	}
 type RunnerMessage struct {
 	Type       RunnerMessageType `json:"type"`
 	SessionID  string            `json:"session_id,omitempty"`
@@ -48,14 +69,16 @@ type RunnerMessage struct {
 	RawEvent   *Event            `json:"raw_event,omitempty"`
 }
 
-// ToolCallInfo 도구 호출 정보
+// ToolCallInfo는 도구 호출 정보를 담는 구조체입니다.
+// MessageTypeToolCall 타입의 RunnerMessage에서 사용됩니다.
 type ToolCallInfo struct {
 	ToolID    string         `json:"tool_id"`
 	ToolName  string         `json:"tool_name"`
 	Arguments map[string]any `json:"arguments,omitempty"`
 }
 
-// ToolResultInfo 도구 결과 정보
+// ToolResultInfo는 도구 실행 결과를 담는 구조체입니다.
+// MessageTypeToolResult 타입의 RunnerMessage에서 사용됩니다.
 type ToolResultInfo struct {
 	ToolID   string `json:"tool_id"`
 	ToolName string `json:"tool_name"`
@@ -63,7 +86,8 @@ type ToolResultInfo struct {
 	IsError  bool   `json:"is_error"`
 }
 
-// MessageErrorInfo 메시지 에러 정보
+// MessageErrorInfo는 메시지 에러 정보를 담는 구조체입니다.
+// MessageTypeError 타입의 RunnerMessage에서 사용됩니다.
 type MessageErrorInfo struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -71,16 +95,48 @@ type MessageErrorInfo struct {
 }
 
 // IsText는 메시지가 텍스트 유형인지 확인합니다.
+//
+// Returns:
+//   - true: MessageTypeText 또는 MessageTypeReasoning
+//   - false: 그 외 모든 타입
+//
+// 사용 예시:
+//
+//	if msg.IsText() {
+//	    fmt.Println(msg.Content)
+//	}
 func (m *RunnerMessage) IsText() bool {
 	return m.Type == MessageTypeText || m.Type == MessageTypeReasoning
 }
 
 // IsToolRelated는 메시지가 도구 관련 유형인지 확인합니다.
+//
+// Returns:
+//   - true: MessageTypeToolCall 또는 MessageTypeToolResult
+//   - false: 그 외 모든 타입
+//
+// 사용 예시:
+//
+//	if msg.IsToolRelated() {
+//	    if msg.Type == MessageTypeToolCall {
+//	        fmt.Println("Tool:", msg.ToolCall.ToolName)
+//	    }
+//	}
 func (m *RunnerMessage) IsToolRelated() bool {
 	return m.Type == MessageTypeToolCall || m.Type == MessageTypeToolResult
 }
 
-// IsTerminal은 메시지가 종료 유형인지 확인합니다.
+// IsTerminal은 메시지가 종료 이벤트인지 확인합니다.
+//
+// Returns:
+//   - true: MessageTypeComplete, MessageTypeError, MessageTypeSessionAborted
+//   - false: 그 외 모든 타입
+//
+// 사용 예시:
+//
+//	if msg.IsTerminal() {
+//	    // 실행 종료 처리
+//	}
 func (m *RunnerMessage) IsTerminal() bool {
 	return m.Type == MessageTypeComplete || m.Type == MessageTypeError || m.Type == MessageTypeSessionAborted
 }

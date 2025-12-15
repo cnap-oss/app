@@ -88,9 +88,16 @@ docker compose -f docker/docker-compose.yml down
    - Methods: `CreateAgent`, `CreateTask`, `UpdateTaskStatus`, `ListTasksByAgent`, etc.
 
 3. **Storage Layer** (`internal/storage`)
+
    - GORM-based PostgreSQL persistence
    - Auto-migration on startup
    - Repository pattern implementation
+
+4. **Runner Layer** (`internal/runner`) - 추가됨 (2024-12-15)
+   - Docker Container 기반 Task 실행 환경
+   - OpenCode API 통합 및 SSE 이벤트 스트리밍
+   - 비동기 실행 및 콜백 기반 결과 전달
+   - RunnerManager를 통한 생명주기 관리
 
 ### Data Model Relationships
 
@@ -126,6 +133,115 @@ The `start` command in `cmd/cnap/main.go` runs two servers concurrently:
 2. **Connector Server**: Discord bot server (placeholder implementation)
 
 Both use context-based cancellation and graceful shutdown with 30s timeout.
+
+## Runner 비동기 콜백 아키텍처
+
+### 개요
+
+Runner는 Docker Container 기반으로 Task를 실행하는 컴포넌트입니다. 완전한 비동기 실행 모델을 사용하며, 실행 결과는 콜백을 통해 Controller에 전달됩니다.
+
+### 주요 컴포넌트
+
+1. **TaskRunner 인터페이스** (`internal/runner/runner.go`)
+
+   - `Run(ctx, req)`: 비동기 실행 시작 (즉시 반환)
+   - 구현체: `Runner` (Docker Container 기반)
+
+2. **StatusCallback 인터페이스** (`internal/runner/runner.go`)
+
+   - `OnStarted(taskID, sessionID)`: 실행 시작 및 세션 생성
+   - `OnMessage(taskID, *RunnerMessage)`: SSE 이벤트 수신
+   - `OnComplete(taskID, *RunResult)`: 성공 완료
+   - `OnError(taskID, error)`: 에러 발생
+
+3. **RunnerMessage 타입** (`internal/runner/api_types.go`)
+
+   - SSE 이벤트를 타입 안전하게 추상화
+   - 타입: Text, Reasoning, ToolCall, ToolResult, Complete, Error 등
+   - 헬퍼 메서드: `IsText()`, `IsToolRelated()`, `IsTerminal()`
+
+4. **RunnerManager** (`internal/runner/manager.go`)
+   - Runner 생명주기 관리 (생성, 시작, 중지, 삭제)
+   - `CreateRunner(ctx, taskID, agentInfo, callback, opts...)`: 콜백과 함께 Runner 생성
+   - `StartRunner(ctx, taskID)`: Container 시작
+   - `StopRunner(ctx, taskID)`: Container 중지 및 제거
+
+### 실행 흐름
+
+```
+1. Controller.CreateTask()
+   └─> RunnerManager.CreateRunner(callback) - 콜백 등록
+       └─> Runner 생성 (Container는 아직 시작 안됨)
+
+2. RunnerManager.StartRunner()
+   └─> Docker Container 시작
+   └─> Health check 대기
+
+3. Controller.executeTask() (goroutine)
+   └─> Runner.Run(ctx, req) - 즉시 반환
+       └─> [별도 goroutine] runInternal()
+           ├─> OpenCode 세션 생성
+           ├─> callback.OnStarted(taskID, sessionID)
+           ├─> SSE 이벤트 구독 시작
+           ├─> 프롬프트 전송
+           └─> 이벤트 수신 루프
+               ├─> convertEventToMessage() - SSE → RunnerMessage
+               ├─> callback.OnMessage(taskID, msg)
+               └─> 완료 시 callback.OnComplete() 또는 OnError()
+```
+
+### 콜백 생명주기
+
+```
+NewRunner(taskID, agentInfo, callback, ...)  # 콜백 등록 (단 한 번)
+  │
+  ├─> StartRunner()                           # Container 시작
+  │
+  └─> Run()                                   # 비동기 실행
+       │
+       ├─> OnStarted(taskID, sessionID)       # 세션 생성
+       │
+       ├─> OnMessage(taskID, msg) ────┐       # SSE 이벤트 (여러 번)
+       ├─> OnMessage(taskID, msg)     │
+       ├─> OnMessage(taskID, msg)     │ 반복
+       ├─> ...                        │
+       │                              │
+       └─> OnComplete(taskID, result) ┘       # 성공 완료
+           또는
+           OnError(taskID, err)               # 에러 발생
+```
+
+### RunnerMessage 타입 시스템
+
+Controller는 `msg.Type`을 통해 이벤트 종류를 식별하고 처리합니다:
+
+```go
+switch msg.Type {
+case MessageTypeText:
+    // msg.Content에 스트리밍 텍스트
+    connector.SendStreamingText(msg.Content)
+
+case MessageTypeToolCall:
+    // msg.ToolCall에 도구 호출 정보
+    connector.SendToolStatus(msg.ToolCall.ToolName, "running")
+
+case MessageTypeToolResult:
+    // msg.ToolResult에 도구 실행 결과
+    connector.SendToolResult(msg.ToolResult.Result)
+
+case MessageTypeComplete:
+    // 메시지 완료 (OnComplete 직전 호출됨)
+    // 전체 출력은 OnComplete에서 전달됨
+}
+```
+
+### 레거시 제거
+
+Phase 5에서 다음 항목들이 제거되었습니다:
+
+- `Runner.runSync()` - 동기 폴링 방식
+- `Runner.runWithStreaming()` - 로직은 executeWithStreaming으로 통합
+- `RunRequest.Callback` 필드 - 콜백은 생성자에서만 등록
 
 ## Important Patterns
 
@@ -210,21 +326,26 @@ Closes #8
 - Docker unified container
 - Health check endpoint
 - Basic CLI structure
+- **Runner 비동기 콜백 아키텍처** (2024-12-15)
+  - Docker Container 기반 TaskRunner 구현
+  - OpenCode API 통합 (SSE 이벤트 스트리밍)
+  - 비동기 실행 및 콜백 기반 결과 전달
+  - RunnerMessage 타입 시스템으로 타입 안전성 확보
+  - RunnerManager를 통한 Runner 생명주기 관리
 
 ### 🚧 Pending Implementation
 
 - Discord bot integration (connector is placeholder)
-- Actual task execution in controller
 - Message processing and storage
 - RunStep tracking during execution
 - Checkpoint creation for Git snapshots
 - Connector ↔ Controller communication mechanism
+- Runner 통합 테스트 확장
 
 ## Next Development Steps
 
 To implement Discord bot functionality:
 
-1. Add `github.com/bwmarrin/discordgo` dependency
 2. Implement Discord event handlers in `internal/connector/server.go`
 3. Create communication channel between Connector and Controller
 4. Implement actual task execution logic in Controller
