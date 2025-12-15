@@ -69,7 +69,7 @@ func TestRunWithResult_Success(t *testing.T) {
 	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
 	ctx := context.Background()
 
-	result, err := runner.RunWithResult(ctx, "grok-code", "test-task", "test prompt")
+	result, err := runner.Request(ctx, "grok-code", "test-task", "test prompt")
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -105,7 +105,7 @@ func TestRunWithResult_APIError(t *testing.T) {
 	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
 	ctx := context.Background()
 
-	result, err := runner.RunWithResult(ctx, "grok-code", "test-task", "test prompt")
+	result, err := runner.Request(ctx, "grok-code", "test-task", "test prompt")
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -128,7 +128,7 @@ func TestRunWithResult_HTTPError(t *testing.T) {
 	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL))
 	ctx := context.Background()
 
-	result, err := runner.RunWithResult(ctx, "grok-code", "test-task", "test prompt")
+	result, err := runner.Request(ctx, "grok-code", "test-task", "test prompt")
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -152,7 +152,7 @@ func TestRunWithResult_Timeout(t *testing.T) {
 	runner := NewRunner(zaptest.NewLogger(t), WithBaseURL(server.URL), WithHTTPClient(client))
 	ctx := context.Background()
 
-	result, err := runner.RunWithResult(ctx, "grok-code", "test-task", "test prompt")
+	result, err := runner.Request(ctx, "grok-code", "test-task", "test prompt")
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -176,7 +176,7 @@ func TestRunWithResult_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	result, err := runner.RunWithResult(ctx, "grok-code", "test-task", "test prompt")
+	result, err := runner.Request(ctx, "grok-code", "test-task", "test prompt")
 
 	require.Error(t, err)
 	assert.Nil(t, result)
