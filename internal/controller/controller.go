@@ -27,7 +27,7 @@ func NewController(logger *zap.Logger, repo *storage.Repository, eventChan chan 
 	return &Controller{
 		logger:              logger,
 		repo:                repo,
-		runnerManager:       taskrunner.GetRunnerManager(),
+		runnerManager:       taskrunner.GetRunnerManager(taskrunner.WithLogger(logger)),
 		taskContexts:        make(map[string]*TaskContext),
 		connectorEventChan:  eventChan,
 		controllerEventChan: resultChan,
