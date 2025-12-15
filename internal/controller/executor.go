@@ -412,12 +412,14 @@ func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID
 			}
 		}
 
-		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusCompleted)
+		// 성공 시 - waiting 상태로 유지 (자동 완료하지 않음)
+		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusWaiting)
 
+		// message 이벤트로 중간 응답 전송 (completed 대신)
 		c.controllerEventChan <- ControllerEvent{
 			TaskID:   taskID,
 			ThreadID: threadID,
-			Status:   "completed",
+			Status:   "message",
 			Content:  result.Output,
 		}
 	}
