@@ -58,5 +58,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 EXPOSE 3000
 
 # 엔트리포인트
-ENTRYPOINT ["opencode", "server"]
-CMD ["--port", "3000", "--host", "0.0.0.0"]
+ENTRYPOINT ["opencode", "serve"]
+CMD ["--port", "3000", "--hostname", "0.0.0.0"]
