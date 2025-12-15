@@ -227,6 +227,7 @@ func TestRun_Success(t *testing.T) {
 
 		case r.Method == "POST" && r.URL.Path == "/session/"+sessionID+"/message":
 			// 프롬프트 전송
+			completed := int64(1234567900) // 완료 시간 설정
 			resp := PromptResponse{
 				Info: AssistantMessage{
 					ID:         "msg_123",
@@ -241,7 +242,54 @@ func TestRun_Success(t *testing.T) {
 						Root: "/workspace",
 					},
 					Time: MessageTime{
-						Created: 1234567890,
+						Created:   1234567890,
+						Completed: &completed,
+					},
+					Cost: 0.01,
+					Tokens: MessageTokens{
+						Input:     100,
+						Output:    200,
+						Reasoning: 0,
+						Cache: MessageTokenCache{
+							Read:  0,
+							Write: 0,
+						},
+					},
+				},
+				Parts: []Part{
+					{
+						ID:        "prt_123",
+						SessionID: sessionID,
+						MessageID: "msg_123",
+						Type:      "text",
+						Text:      "test response",
+					},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+
+		case r.Method == "GET" && r.URL.Path == "/session/"+sessionID+"/message/msg_123":
+			// 메시지 조회 (폴링용)
+			completed := int64(1234567900)
+			resp := struct {
+				Info  AssistantMessage `json:"info"`
+				Parts []Part           `json:"parts"`
+			}{
+				Info: AssistantMessage{
+					ID:         "msg_123",
+					SessionID:  sessionID,
+					Role:       "assistant",
+					ParentID:   "msg_000",
+					ModelID:    "grok-code",
+					ProviderID: "anthropic",
+					Mode:       "code",
+					Path: MessagePath{
+						Cwd:  "/workspace",
+						Root: "/workspace",
+					},
+					Time: MessageTime{
+						Created:   1234567890,
+						Completed: &completed,
 					},
 					Cost: 0.01,
 					Tokens: MessageTokens{

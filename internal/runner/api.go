@@ -163,8 +163,30 @@ func (c *OpenCodeClient) Prompt(ctx context.Context, sessionID string, req *Prom
 	}
 	defer resp.Body.Close()
 
+	// 응답 body 읽기
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("응답 읽기 실패: %w", err)
+	}
+
+	// 빈 응답 체크
+	if len(bodyBytes) == 0 {
+		return nil, fmt.Errorf("응답 파싱 실패: 빈 응답")
+	}
+
 	var result PromptResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		// body preview (최대 200자)
+		preview := string(bodyBytes)
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		c.logger.Error("응답 파싱 실패",
+			zap.String("session_id", sessionID),
+			zap.Int("body_length", len(bodyBytes)),
+			zap.String("body_preview", preview),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("응답 파싱 실패: %w", err)
 	}
 
