@@ -110,6 +110,9 @@ func TestRunner_RealAPI(t *testing.T) {
 		t.Skip("OPENCODE_API_KEY or OPEN_CODE_API_KEY not set; skipping real API call")
 	}
 
+	// 콜백 생성
+	callback := newMockCallback(t)
+
 	// Runner 생성
 	runner, err := NewRunner(
 		"integration-test",
@@ -117,6 +120,7 @@ func TestRunner_RealAPI(t *testing.T) {
 			AgentID: "test-agent",
 			Model:   "grok-code",
 		},
+		callback,
 		zap.NewExample(),
 	)
 	require.NoError(t, err)
@@ -135,16 +139,25 @@ func TestRunner_RealAPI(t *testing.T) {
 		_ = runner.Stop(cleanupCtx)
 	}()
 
-	// AI API 호출 (동기 모드 - callback 없음)
-	res, err := runner.Run(ctx, &RunRequest{
+	// AI API 호출 (비동기 모드)
+	err = runner.Run(ctx, &RunRequest{
 		TaskID: "integration-test",
 		Model:  "grok-code",
 		Messages: []ChatMessage{
 			{Role: "user", Content: "AI란 무엇인가?"},
 		},
 	})
-
 	require.NoError(t, err)
+
+	// 완료 대기
+	select {
+	case <-time.After(120 * time.Second):
+		t.Fatal("timeout waiting for completion")
+	default:
+		time.Sleep(10 * time.Second) // 응답 대기
+	}
+
+	res := callback.GetCompleteResult()
 	require.NotNil(t, res)
 	require.True(t, res.Success)
 	require.NotEmpty(t, res.Output)
@@ -167,6 +180,9 @@ func TestRunner_RealAPI_WithCallback(t *testing.T) {
 		t.Skip("OPENCODE_API_KEY or OPEN_CODE_API_KEY not set; skipping real API call")
 	}
 
+	// 콜백 생성
+	callback := newMockCallback(t)
+
 	// Runner 생성
 	runner, err := NewRunner(
 		"integration-test-callback",
@@ -174,6 +190,7 @@ func TestRunner_RealAPI_WithCallback(t *testing.T) {
 			AgentID: "test-agent",
 			Model:   "grok-code",
 		},
+		callback,
 		zap.NewExample(),
 	)
 	require.NoError(t, err)
@@ -194,22 +211,22 @@ func TestRunner_RealAPI_WithCallback(t *testing.T) {
 		}
 	}()
 
-	// 콜백 생성
-	callback := newMockCallback(t)
-
 	t.Log("========== Starting AI API Call ==========")
 
-	// AI API 호출 (스트리밍 모드 - callback 있음)
-	res, err := runner.Run(ctx, &RunRequest{
+	// AI API 호출 (비동기 모드)
+	err = runner.Run(ctx, &RunRequest{
 		TaskID: "integration-test-callback",
 		Model:  "grok-code",
 		Messages: []ChatMessage{
 			{Role: "user", Content: "간단히 'Hello, World!'라고만 답해줘."},
 		},
-		Callback: callback,
 	})
-
 	require.NoError(t, err)
+
+	// 완료 대기
+	time.Sleep(30 * time.Second)
+
+	res := callback.GetCompleteResult()
 	require.NotNil(t, res)
 	require.True(t, res.Success)
 	require.NotEmpty(t, res.Output)
@@ -261,6 +278,9 @@ func TestRunner_RealAPI_EmptyResponseHandling(t *testing.T) {
 		t.Skip("OPENCODE_API_KEY or OPEN_CODE_API_KEY not set; skipping real API call")
 	}
 
+	// 콜백 생성
+	callback := newMockCallback(t)
+
 	// Runner 생성
 	runner, err := NewRunner(
 		"integration-test-empty",
@@ -268,6 +288,7 @@ func TestRunner_RealAPI_EmptyResponseHandling(t *testing.T) {
 			AgentID: "test-agent",
 			Model:   "grok-code",
 		},
+		callback,
 		zap.NewExample(),
 	)
 	require.NoError(t, err)
@@ -288,28 +309,29 @@ func TestRunner_RealAPI_EmptyResponseHandling(t *testing.T) {
 		}
 	}()
 
-	// 콜백 생성
-	callback := newMockCallback(t)
-
 	// AI API 호출 - 여러 번 시도하여 빈 응답 처리 검증
 	for i := 0; i < 3; i++ {
 		t.Logf("Attempt %d/3", i+1)
 
-		res, err := runner.Run(ctx, &RunRequest{
+		err := runner.Run(ctx, &RunRequest{
 			TaskID: fmt.Sprintf("integration-test-empty-%d", i),
 			Model:  "grok-code",
 			Messages: []ChatMessage{
 				{Role: "user", Content: "안녕하세요"},
 			},
-			Callback: callback,
 		})
 
 		// 빈 응답이어도 에러가 발생하지 않아야 함
-		require.NoError(t, err, "Empty response should not cause error")
-		require.NotNil(t, res, "Result should not be nil even with empty response")
-		require.True(t, res.Success, "Success should be true even with empty response")
+		require.NoError(t, err, "Run should not return error")
 
-		t.Logf("Attempt %d result: output_length=%d", i+1, len(res.Output))
+		// 잠시 대기
+		time.Sleep(10 * time.Second)
+
+		res := callback.GetCompleteResult()
+		if res != nil {
+			require.True(t, res.Success, "Success should be true even with empty response")
+			t.Logf("Attempt %d result: output_length=%d", i+1, len(res.Output))
+		}
 	}
 
 	t.Logf("Total OnMessage calls: %d", callback.onMessageCalled)

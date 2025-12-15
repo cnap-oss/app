@@ -99,9 +99,9 @@ func (rm *RunnerManager) Stop(ctx context.Context) error {
 	return rm.Cleanup(ctx)
 }
 
-// CreateRunner creates a new Runner and adds it to the manager.
+// CreateRunner creates a new Runner with callback and adds it to the manager.
 // Container는 생성되지만 시작되지 않습니다. StartRunner()를 별도로 호출해야 합니다.
-func (rm *RunnerManager) CreateRunner(ctx context.Context, taskID string, agentInfo AgentInfo, opts ...RunnerOption) (*Runner, error) {
+func (rm *RunnerManager) CreateRunner(ctx context.Context, taskID string, agentInfo AgentInfo, callback StatusCallback, opts ...RunnerOption) (*Runner, error) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
@@ -116,6 +116,7 @@ func (rm *RunnerManager) CreateRunner(ctx context.Context, taskID string, agentI
 	runner, err := NewRunner(
 		taskID,
 		agentInfo,
+		callback,
 		rm.logger,
 		allOpts...,
 	)

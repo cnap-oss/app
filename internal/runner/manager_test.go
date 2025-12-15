@@ -40,7 +40,8 @@ func TestRunnerManager_CRUD(t *testing.T) {
 	ctx := context.Background()
 
 	// Create
-	runner, err := rm.CreateRunner(ctx, taskId, agent)
+	callback := NewMockStatusCallback()
+	runner, err := rm.CreateRunner(ctx, taskId, agent, callback)
 	require.NoError(t, err)
 	assert.NotNil(t, runner)
 	assert.Equal(t, taskId, runner.ID)
@@ -83,7 +84,8 @@ func TestRunnerManager_GetRunner(t *testing.T) {
 	assert.Nil(t, runner)
 
 	// Create runner
-	createdRunner, err := rm.CreateRunner(ctx, taskId, agent)
+	callback := NewMockStatusCallback()
+	createdRunner, err := rm.CreateRunner(ctx, taskId, agent, callback)
 	require.NoError(t, err)
 	assert.NotNil(t, createdRunner)
 
@@ -112,7 +114,8 @@ func TestRunnerManager_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
 			taskId := fmt.Sprintf("task-%d", id)
-			runner, err := rm.CreateRunner(ctx, taskId, agent)
+			callback := NewMockStatusCallback()
+			runner, err := rm.CreateRunner(ctx, taskId, agent, callback)
 			assert.NoError(t, err)
 			assert.NotNil(t, runner)
 			done <- true
@@ -173,7 +176,8 @@ func TestRunnerManager_GetRunnerCount(t *testing.T) {
 	// Create runners
 	for i := 0; i < 5; i++ {
 		taskId := fmt.Sprintf("task-%d", i)
-		_, err := rm.CreateRunner(ctx, taskId, agent)
+		callback := NewMockStatusCallback()
+		_, err := rm.CreateRunner(ctx, taskId, agent, callback)
 		require.NoError(t, err)
 	}
 

@@ -17,17 +17,18 @@ import (
 
 // TaskRunner는 Task 실행을 위한 인터페이스입니다.
 type TaskRunner interface {
-	// Run은 주어진 메시지들로 AI API를 호출하고 결과를 반환합니다.
-	Run(ctx context.Context, req *RunRequest) (*RunResult, error)
+	// Run은 주어진 요청으로 비동기 실행을 시작합니다.
+	// 즉시 반환되며, 결과는 생성 시 등록된 콜백을 통해 전달됩니다.
+	Run(ctx context.Context, req *RunRequest) error
 }
 
 // RunRequest는 TaskRunner 실행 요청입니다.
+// 콜백은 Runner 생성 시 등록되므로 RunRequest에는 포함되지 않습니다.
 type RunRequest struct {
 	TaskID       string
 	Model        string
 	SystemPrompt string
 	Messages     []ChatMessage
-	Callback     StatusCallback // 중간 응답 콜백 (optional)
 }
 
 // AgentInfo는 에이전트 실행에 필요한 정보를 담는 구조체입니다.
@@ -88,6 +89,9 @@ type Runner struct {
 
 	// 작업 공간
 	WorkspacePath string // 마운트된 작업 공간 경로
+
+	// 콜백 핸들러 (생성 시 등록)
+	callback StatusCallback
 
 	// 내부 의존성
 	dockerClient DockerClient
@@ -164,9 +168,13 @@ type OpenCodeResponse struct {
 }
 
 // NewRunner는 새로운 Container 기반 Runner를 생성합니다.
+// callback은 생성자에서만 등록되며, nil이면 에러를 반환합니다.
 // 이 함수는 Container를 생성하지 않고 Runner 구조체만 초기화합니다.
 // Container 시작은 Start() 메서드로 별도로 수행해야 합니다.
-func NewRunner(taskID string, agentInfo AgentInfo, logger *zap.Logger, opts ...RunnerOption) (*Runner, error) {
+func NewRunner(taskID string, agentInfo AgentInfo, callback StatusCallback, logger *zap.Logger, opts ...RunnerOption) (*Runner, error) {
+	if callback == nil {
+		return nil, fmt.Errorf("callback is required")
+	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -193,6 +201,7 @@ func NewRunner(taskID string, agentInfo AgentInfo, logger *zap.Logger, opts ...R
 		ID:            taskID,
 		Status:        RunnerStatusPending,
 		agentInfo:     agentInfo,
+		callback:      callback,
 		logger:        logger,
 		httpClient:    &http.Client{Timeout: 120 * time.Second},
 		ContainerPort: 3000,
@@ -414,11 +423,38 @@ func (r *Runner) waitForHealthy(ctx context.Context) error {
 var _ TaskRunner = (*Runner)(nil)
 
 // Run implements TaskRunner interface.
-func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
+// 비동기로 실행을 시작하며, 결과는 콜백으로 전달됩니다.
+func (r *Runner) Run(ctx context.Context, req *RunRequest) error {
 	if r.Status != RunnerStatusReady {
-		return nil, fmt.Errorf("runner가 준비되지 않음 (status: %s)", r.Status)
+		return fmt.Errorf("runner가 준비되지 않음 (status: %s)", r.Status)
 	}
 
+	// 요청 검증
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+
+	r.logger.Info("Runner starting async execution",
+		zap.String("runner_id", r.ID),
+		zap.String("task_id", req.TaskID),
+		zap.Int("message_count", len(req.Messages)),
+	)
+
+	// 비동기 실행 시작
+	go func() {
+		result, err := r.runInternal(ctx, req)
+		if err != nil {
+			_ = r.callback.OnError(req.TaskID, err)
+			return
+		}
+		_ = r.callback.OnComplete(req.TaskID, result)
+	}()
+
+	return nil
+}
+
+// runInternal은 실제 실행 로직을 담당합니다 (기존 runWithStreaming 로직 기반).
+func (r *Runner) runInternal(ctx context.Context, req *RunRequest) (*RunResult, error) {
 	r.Status = RunnerStatusRunning
 	defer func() {
 		r.Status = RunnerStatusReady
@@ -440,13 +476,243 @@ func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
 	// 시스템 프롬프트와 메시지 결합
 	messages := r.buildMessages(req)
 
-	// 콜백이 있으면 스트리밍 모드 사용
-	if req.Callback != nil {
-		return r.runWithStreaming(ctx, apiClient, req, messages)
+	// 스트리밍 모드로 실행 (콜백 사용)
+	return r.executeWithStreaming(ctx, apiClient, req, messages)
+}
+
+// executeWithStreaming는 스트리밍 모드로 실행합니다.
+func (r *Runner) executeWithStreaming(ctx context.Context, client *OpenCodeClient, req *RunRequest, messages []ChatMessage) (*RunResult, error) {
+	// 1. 세션 생성
+	session, err := client.CreateSession(ctx, &CreateSessionRequest{
+		Title: req.TaskID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("세션 생성 실패: %w", err)
 	}
 
-	// 일반 모드
-	return r.runSync(ctx, apiClient, req, messages)
+	defer func() {
+		if err := client.DeleteSession(context.Background(), session.ID); err != nil {
+			r.logger.Warn("세션 삭제 실패",
+				zap.String("session_id", session.ID),
+				zap.Error(err),
+			)
+		}
+	}()
+
+	// 세션 생성 알림
+	if r.callback != nil {
+		if err := r.callback.OnStarted(req.TaskID, session.ID); err != nil {
+			r.logger.Warn("OnStarted 콜백 실패", zap.Error(err))
+		}
+	}
+
+	// 2. 이벤트 구독 시작 (비동기)
+	var fullContent strings.Builder
+	eventCtx, cancelEvent := context.WithCancel(ctx)
+	defer cancelEvent()
+
+	messageCompleted := make(chan bool, 1)
+	eventDone := make(chan error, 1)
+	go func() {
+		err := client.SubscribeEvents(eventCtx, func(event *Event) error {
+			r.logger.Debug("이벤트 수신",
+				zap.String("task_id", req.TaskID),
+				zap.String("event_type", event.Type),
+			)
+
+			// SSE 이벤트를 RunnerMessage로 변환
+			msg := r.convertEventToMessage(event, session.ID)
+			if msg == nil {
+				return nil // 지원하지 않는 이벤트 타입
+			}
+
+			// 텍스트 이벤트인 경우 전체 컨텐츠에 추가
+			if msg.IsText() && msg.Content != "" {
+				fullContent.WriteString(msg.Content)
+			}
+
+			// 콜백으로 메시지 전달
+			if r.callback != nil {
+				if err := r.callback.OnMessage(req.TaskID, msg); err != nil {
+					r.logger.Warn("콜백 전달 실패",
+						zap.String("task_id", req.TaskID),
+						zap.String("msg_type", string(msg.Type)),
+						zap.Error(err),
+					)
+				}
+			}
+
+			// 완료 이벤트인 경우 채널로 알림
+			if msg.Type == MessageTypeComplete {
+				select {
+				case messageCompleted <- true:
+				default:
+				}
+			}
+
+			return nil
+		})
+		eventDone <- err
+	}()
+
+	// 잠시 대기 (이벤트 구독 준비)
+	time.Sleep(500 * time.Millisecond)
+
+	// 3. 모델 정보 파싱
+	providerID, modelID := parseModel(req.Model)
+
+	// 4. 메시지를 프롬프트 파트로 변환
+	parts := make([]PromptPart, 0, len(messages))
+	for _, msg := range messages {
+		parts = append(parts, TextPartInput{
+			Type: "text",
+			Text: msg.Content,
+		})
+	}
+
+	// 5. 프롬프트 전송
+	promptReq := &PromptRequest{
+		Model: &PromptModel{
+			ProviderID: providerID,
+			ModelID:    modelID,
+		},
+		Parts: parts,
+	}
+
+	_, err = client.Prompt(ctx, session.ID, promptReq)
+	if err != nil {
+		cancelEvent()
+		return nil, fmt.Errorf("프롬프트 전송 실패: %w", err)
+	}
+
+	// 6. 메시지 완료 또는 타임아웃 대기
+	eventWaitTimeout := 30 * time.Second
+	select {
+	case <-messageCompleted:
+		r.logger.Info("메시지 완료 이벤트 수신",
+			zap.String("task_id", req.TaskID),
+			zap.Int("content_length", fullContent.Len()),
+		)
+		cancelEvent()
+	case err := <-eventDone:
+		if err != nil && err != context.Canceled {
+			r.logger.Warn("이벤트 스트림 에러",
+				zap.String("task_id", req.TaskID),
+				zap.Error(err),
+			)
+			if fullContent.Len() == 0 {
+				return nil, fmt.Errorf("이벤트 스트림 에러: %w", err)
+			}
+		}
+		cancelEvent()
+	case <-time.After(eventWaitTimeout):
+		r.logger.Info("이벤트 대기 타임아웃, 받은 컨텐츠로 진행",
+			zap.String("task_id", req.TaskID),
+			zap.Int("content_length", fullContent.Len()),
+		)
+		cancelEvent()
+	case <-ctx.Done():
+		r.logger.Warn("컨텍스트 취소됨",
+			zap.String("task_id", req.TaskID),
+			zap.Error(ctx.Err()),
+		)
+		cancelEvent()
+		if fullContent.Len() == 0 {
+			return nil, ctx.Err()
+		}
+	}
+
+	output := fullContent.String()
+
+	if output == "" {
+		r.logger.Warn("빈 응답 수신", zap.String("task_id", req.TaskID))
+	}
+
+	result := &RunResult{
+		Agent:   req.Model,
+		Name:    req.TaskID,
+		Success: true,
+		Output:  output,
+		Error:   nil,
+	}
+
+	return result, nil
+}
+
+// convertEventToMessage는 SSE Event를 RunnerMessage로 변환합니다.
+func (r *Runner) convertEventToMessage(event *Event, sessionID string) *RunnerMessage {
+	msg := &RunnerMessage{
+		SessionID: sessionID,
+		Timestamp: time.Now(),
+		RawEvent:  event,
+	}
+
+	switch event.Type {
+	case "message.part.updated":
+		// 파트 정보 추출
+		if props, ok := event.Properties["part"].(map[string]interface{}); ok {
+			partType, _ := props["type"].(string)
+			partID, _ := props["id"].(string)
+			messageID, _ := event.Properties["messageID"].(string)
+
+			msg.PartID = partID
+			msg.MessageID = messageID
+
+			switch partType {
+			case "text":
+				msg.Type = MessageTypeText
+				msg.Content, _ = props["text"].(string)
+			case "reasoning":
+				msg.Type = MessageTypeReasoning
+				msg.Content, _ = props["text"].(string)
+			case "tool":
+				// 도구 상태 확인
+				if state, ok := props["state"].(map[string]interface{}); ok {
+					status, _ := state["status"].(string)
+					callID, _ := props["callID"].(string)
+					tool, _ := props["tool"].(string)
+
+					if status == "running" || status == "pending" {
+						msg.Type = MessageTypeToolCall
+						msg.ToolCall = &ToolCallInfo{
+							ToolID:   callID,
+							ToolName: tool,
+						}
+						if input, ok := state["input"].(map[string]interface{}); ok {
+							msg.ToolCall.Arguments = input
+						}
+					} else {
+						msg.Type = MessageTypeToolResult
+						msg.ToolResult = &ToolResultInfo{
+							ToolID:   callID,
+							ToolName: tool,
+							Result:   "",
+							IsError:  status == "error",
+						}
+						if output, ok := state["output"].(string); ok {
+							msg.ToolResult.Result = output
+						}
+					}
+				}
+			default:
+				return nil // 지원하지 않는 파트 타입
+			}
+		}
+
+	case "message.completed":
+		msg.Type = MessageTypeComplete
+		if messageID, ok := event.Properties["messageID"].(string); ok {
+			msg.MessageID = messageID
+		}
+
+	case "session.aborted":
+		msg.Type = MessageTypeSessionAborted
+
+	default:
+		return nil // 지원하지 않는 이벤트 타입
+	}
+
+	return msg
 }
 
 // buildMessages는 요청 메시지를 구성합니다.
@@ -467,7 +733,8 @@ func (r *Runner) buildMessages(req *RunRequest) []ChatMessage {
 	return messages
 }
 
-// runSync는 동기 모드로 실행합니다.
+// runSync는 동기 모드로 실행합니다 (레거시 - Phase 5에서 삭제 예정).
+// nolint:unused
 func (r *Runner) runSync(ctx context.Context, client *OpenCodeClient, req *RunRequest, messages []ChatMessage) (*RunResult, error) {
 	// 1. 세션 생성
 	session, err := client.CreateSession(ctx, &CreateSessionRequest{
@@ -577,6 +844,8 @@ func (r *Runner) runSync(ctx context.Context, client *OpenCodeClient, req *RunRe
 }
 
 // runWithStreaming는 스트리밍 모드로 실행합니다 (이벤트 구독 사용).
+// 레거시 메서드 - Phase 5에서 삭제 예정
+// nolint:unused
 func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, req *RunRequest, messages []ChatMessage) (*RunResult, error) {
 	// 1. 세션 생성
 	session, err := client.CreateSession(ctx, &CreateSessionRequest{
@@ -615,22 +884,6 @@ func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, r
 					if partType, ok := props["type"].(string); ok && partType == "text" {
 						if text, ok := props["text"].(string); ok {
 							fullContent.WriteString(text)
-
-							// 콜백으로 중간 응답 전달
-							if req.Callback != nil {
-								msg := &RunnerMessage{
-									Type:      MessageTypeText,
-									Timestamp: time.Now(),
-									Content:   text,
-									RawEvent:  event,
-								}
-								if err := req.Callback.OnMessage(req.TaskID, msg); err != nil {
-									r.logger.Warn("콜백 전달 실패",
-										zap.String("task_id", req.TaskID),
-										zap.Error(err),
-									)
-								}
-							}
 						}
 					}
 				}
@@ -680,9 +933,6 @@ func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, r
 	_, err = client.Prompt(ctx, session.ID, promptReq)
 	if err != nil {
 		cancelEvent()
-		if req.Callback != nil {
-			_ = req.Callback.OnError(req.TaskID, err)
-		}
 		return nil, fmt.Errorf("프롬프트 전송 실패: %w", err)
 	}
 
@@ -710,9 +960,6 @@ func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, r
 					zap.Int("content_length", fullContent.Len()),
 				)
 			} else {
-				if req.Callback != nil {
-					_ = req.Callback.OnError(req.TaskID, err)
-				}
 				return nil, fmt.Errorf("이벤트 스트림 에러: %w", err)
 			}
 		}
@@ -750,25 +997,13 @@ func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, r
 		// 빈 응답도 에러로 처리하지 않고 경고만 출력
 	}
 
-	result := &RunResult{
+	return &RunResult{
 		Agent:   req.Model,
 		Name:    req.TaskID,
 		Success: true,
 		Output:  output,
 		Error:   nil,
-	}
-
-	// 완료 콜백
-	if req.Callback != nil {
-		if err := req.Callback.OnComplete(req.TaskID, result); err != nil {
-			r.logger.Warn("완료 콜백 실패",
-				zap.String("task_id", req.TaskID),
-				zap.Error(err),
-			)
-		}
-	}
-
-	return result, nil
+	}, nil
 }
 
 // parseModel은 "provider/model" 형식의 모델 문자열을 파싱합니다.
