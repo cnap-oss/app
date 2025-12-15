@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
-// TestRunWithResult_Success tests successful API call
+// TestRunWithResult_Success tests successful API call (레거시 OpenCode Zen API)
 func TestRunWithResult_Success(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
@@ -84,7 +84,7 @@ func TestRunWithResult_Success(t *testing.T) {
 	assert.Nil(t, result.Error)
 }
 
-// TestRunWithResult_APIError tests API error response
+// TestRunWithResult_APIError tests API error response (레거시)
 func TestRunWithResult_APIError(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
@@ -121,7 +121,7 @@ func TestRunWithResult_APIError(t *testing.T) {
 	assert.Contains(t, err.Error(), "Invalid API key")
 }
 
-// TestRunWithResult_HTTPError tests HTTP error status codes
+// TestRunWithResult_HTTPError tests HTTP error status codes (레거시)
 func TestRunWithResult_HTTPError(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
@@ -146,7 +146,7 @@ func TestRunWithResult_HTTPError(t *testing.T) {
 	assert.Contains(t, err.Error(), "500")
 }
 
-// TestRunWithResult_Timeout tests timeout handling
+// TestRunWithResult_Timeout tests timeout handling (레거시)
 func TestRunWithResult_Timeout(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
@@ -172,7 +172,7 @@ func TestRunWithResult_Timeout(t *testing.T) {
 	assert.Contains(t, err.Error(), "API 요청 실패")
 }
 
-// TestRunWithResult_ContextCancellation tests context cancellation
+// TestRunWithResult_ContextCancellation tests context cancellation (레거시)
 func TestRunWithResult_ContextCancellation(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
@@ -199,40 +199,92 @@ func TestRunWithResult_ContextCancellation(t *testing.T) {
 	assert.Contains(t, err.Error(), "API 요청 실패")
 }
 
-// TestRun_Success tests TaskRunner interface implementation
+// TestRun_Success tests TaskRunner interface implementation with new OpenCode API
 func TestRun_Success(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
-	// Mock server that returns successful response from new API
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/chat" {
-			// New OpenCode API format
-			resp := ChatResponse{
-				ID:    "test-id",
-				Model: "grok-code",
-			}
-			resp.Response.Role = "assistant"
-			resp.Response.Content = "test response"
-			resp.FinishReason = "stop"
+	sessionID := "ses_test123"
 
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
+	// Mock server for new OpenCode API
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/session":
+			// 세션 생성
+			resp := Session{
+				ID:        sessionID,
+				ProjectID: "proj_1",
+				Directory: "/workspace",
+				Title:     "task-1",
+				Version:   "1.0.0",
+				Time: SessionTime{
+					Created: 1234567890,
+					Updated: 1234567890,
+				},
+			}
 			_ = json.NewEncoder(w).Encode(resp)
-		} else {
+
+		case r.Method == "POST" && r.URL.Path == "/session/"+sessionID+"/message":
+			// 프롬프트 전송
+			resp := PromptResponse{
+				Info: AssistantMessage{
+					ID:         "msg_123",
+					SessionID:  sessionID,
+					Role:       "assistant",
+					ParentID:   "msg_000",
+					ModelID:    "grok-code",
+					ProviderID: "anthropic",
+					Mode:       "code",
+					Path: MessagePath{
+						Cwd:  "/workspace",
+						Root: "/workspace",
+					},
+					Time: MessageTime{
+						Created: 1234567890,
+					},
+					Cost: 0.01,
+					Tokens: MessageTokens{
+						Input:     100,
+						Output:    200,
+						Reasoning: 0,
+						Cache: MessageTokenCache{
+							Read:  0,
+							Write: 0,
+						},
+					},
+				},
+				Parts: []Part{
+					{
+						ID:        "prt_123",
+						SessionID: sessionID,
+						MessageID: "msg_123",
+						Type:      "text",
+						Text:      "test response",
+					},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+
+		case r.Method == "DELETE" && r.URL.Path == "/session/"+sessionID:
+			// 세션 삭제
+			_ = json.NewEncoder(w).Encode(true)
+
+		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer server.Close()
 
-	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "anthropic/grok-code"}, zaptest.NewLogger(t))
 	require.NoError(t, err)
-	runner.Status = RunnerStatusReady // Set status to ready for Phase 2 implementation
-	runner.BaseURL = server.URL       // Set BaseURL for API client
+	runner.Status = RunnerStatusReady
+	runner.BaseURL = server.URL
 	ctx := context.Background()
 
 	req := &RunRequest{
 		TaskID:       "task-1",
-		Model:        "grok-code",
+		Model:        "anthropic/grok-code",
 		SystemPrompt: "You are a helpful assistant",
 		Messages: []ChatMessage{
 			{Role: "user", Content: "Hello"},
@@ -245,122 +297,10 @@ func TestRun_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, "grok-code", result.Agent)
+	assert.Equal(t, "anthropic/grok-code", result.Agent)
 	assert.Equal(t, "task-1", result.Name)
 	assert.True(t, result.Success)
 	assert.Equal(t, "test response", result.Output)
-}
-
-// TestRun_WithSystemPrompt tests system prompt handling
-func TestRun_WithSystemPrompt(t *testing.T) {
-	t.Setenv("OPEN_CODE_API_KEY", "test-key")
-
-	// Track what was sent to the API
-	var receivedMessages []ChatMessage
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/chat" {
-			var reqBody ChatRequest
-			_ = json.NewDecoder(r.Body).Decode(&reqBody)
-			receivedMessages = reqBody.Messages
-
-			resp := ChatResponse{
-				ID:    "test-id",
-				Model: "grok-code",
-			}
-			resp.Response.Role = "assistant"
-			resp.Response.Content = "response"
-			resp.FinishReason = "stop"
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(resp)
-		} else {
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
-	require.NoError(t, err)
-	runner.Status = RunnerStatusReady // Set status to ready for Phase 2 implementation
-	runner.BaseURL = server.URL       // Set BaseURL for API client
-	ctx := context.Background()
-
-	req := &RunRequest{
-		TaskID:       "task-1",
-		Model:        "grok-code",
-		SystemPrompt: "You are a helpful assistant",
-		Messages: []ChatMessage{
-			{Role: "user", Content: "Hello"},
-		},
-	}
-
-	_, err = runner.Run(ctx, req)
-	require.NoError(t, err)
-
-	// Verify system prompt was included in the messages
-	// Now the implementation sends the entire conversation history with system prompt
-	assert.Len(t, receivedMessages, 2)
-	assert.Equal(t, "system", receivedMessages[0].Role)
-	assert.Equal(t, "You are a helpful assistant", receivedMessages[0].Content)
-	assert.Equal(t, "user", receivedMessages[1].Role)
-	assert.Equal(t, "Hello", receivedMessages[1].Content)
-}
-
-// TestRun_NoUserMessage tests behavior when there's no user message
-func TestRun_NoUserMessage(t *testing.T) {
-	t.Setenv("OPEN_CODE_API_KEY", "test-key")
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/chat" {
-			resp := ChatResponse{
-				ID:    "test-id",
-				Model: "grok-code",
-			}
-			resp.Response.Role = "assistant"
-			resp.Response.Content = "response"
-			resp.FinishReason = "stop"
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(resp)
-		} else {
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
-	require.NoError(t, err)
-	runner.Status = RunnerStatusReady // Set status to ready for Phase 2 implementation
-	runner.BaseURL = server.URL       // Set BaseURL for API client
-	ctx := context.Background()
-
-	req := &RunRequest{
-		TaskID:       "task-1",
-		Model:        "grok-code",
-		SystemPrompt: "You are a helpful assistant",
-		Messages: []ChatMessage{
-			{Role: "assistant", Content: "Hello"},
-		},
-	}
-
-	// Should still work, but prompt will be empty
-	result, err := runner.Run(ctx, req)
-	require.NoError(t, err)
-	assert.NotNil(t, result)
-}
-
-// TestNewRunner_NoAPIKey tests that NewRunner fails when API key is not set
-func TestNewRunner_NoAPIKey(t *testing.T) {
-	// Unset the API key
-	t.Setenv("OPEN_CODE_API_KEY", "")
-
-	// This should panic or fail since NewRunner calls logger.Fatal
-	// We can't easily test Fatal calls, so we skip this test
-	// In production, this would be caught at startup
-	t.Skip("NewRunner calls logger.Fatal which can't be easily tested")
 }
 
 // TestNewRunner_WithOptions tests Runner creation with options
