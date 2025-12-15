@@ -63,7 +63,7 @@ func (c *Controller) handleExecuteEvent(ctx context.Context, event ConnectorEven
 		c.controllerEventChan <- ControllerEvent{
 			TaskID: event.TaskID,
 			Status: "failed",
-			Error:  fmt.Errorf("task not found: %w", err),
+			Error:  fmt.Errorf("failed to create task: %w", err),
 		}
 		return
 	}
