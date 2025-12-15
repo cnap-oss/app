@@ -415,14 +415,6 @@ func (c *Controller) executeTaskWithEventEmit(ctx context.Context, taskID, threa
 
 		// 성공 시 - waiting 상태로 유지 (자동 완료하지 않음)
 		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusWaiting)
-
-		// message 이벤트로 중간 응답 전송 (completed 대신)
-		c.controllerEventChan <- ControllerEvent{
-			TaskID:   taskID,
-			ThreadID: threadID,
-			Status:   "message",
-			Content:  result.Output,
-		}
 	}
 
 	// Runner 삭제하지 않음 - Task가 waiting 상태이므로 Runner 유지
