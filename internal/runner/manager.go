@@ -49,9 +49,12 @@ var (
 // GetRunnerManager returns the singleton instance of RunnerManager.
 func GetRunnerManager(opts ...RunnerManagerOption) *RunnerManager {
 	once.Do(func() {
+		// 기본 로거 설정
+		l, _ := zap.NewDevelopment()
+
 		instance = &RunnerManager{
 			runners: make(map[string]*Runner),
-			logger:  zap.NewNop(),
+			logger:  l,
 		}
 
 		for _, opt := range opts {
