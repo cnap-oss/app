@@ -20,44 +20,60 @@ type MockRunner struct {
 
 	// DefaultResponse는 Responses에 없는 경우 사용할 기본 응답입니다.
 	DefaultResponse string
+
+	// Callback은 등록된 콜백입니다.
+	Callback taskrunner.StatusCallback
 }
 
 // NewMockRunner는 새로운 MockRunner를 생성합니다.
-func NewMockRunner() *MockRunner {
+func NewMockRunner(callback taskrunner.StatusCallback) *MockRunner {
 	return &MockRunner{
 		Responses:       make(map[string]string),
 		Errors:          make(map[string]error),
 		Calls:           make([]*taskrunner.RunRequest, 0),
 		DefaultResponse: "Mock response",
+		Callback:        callback,
 	}
 }
 
 // ensure MockRunner implements TaskRunner
 var _ taskrunner.TaskRunner = (*MockRunner)(nil)
 
-// Run implements TaskRunner interface.
-func (m *MockRunner) Run(ctx context.Context, req *taskrunner.RunRequest) (*taskrunner.RunResult, error) {
+// Run implements TaskRunner interface (비동기).
+func (m *MockRunner) Run(ctx context.Context, req *taskrunner.RunRequest) error {
 	// 호출 기록
 	m.Calls = append(m.Calls, req)
 
-	// 에러 체크
-	if err, ok := m.Errors[req.TaskID]; ok {
-		return nil, err
-	}
+	// 비동기로 콜백 호출
+	go func() {
+		// 에러 체크
+		if err, ok := m.Errors[req.TaskID]; ok {
+			if m.Callback != nil {
+				_ = m.Callback.OnError(req.TaskID, err)
+			}
+			return
+		}
 
-	// 응답 조회
-	response := m.DefaultResponse
-	if resp, ok := m.Responses[req.TaskID]; ok {
-		response = resp
-	}
+		// 응답 조회
+		response := m.DefaultResponse
+		if resp, ok := m.Responses[req.TaskID]; ok {
+			response = resp
+		}
 
-	return &taskrunner.RunResult{
-		Agent:   req.Model,
-		Name:    req.TaskID,
-		Success: true,
-		Output:  response,
-		Error:   nil,
-	}, nil
+		result := &taskrunner.RunResult{
+			Agent:   req.Model,
+			Name:    req.TaskID,
+			Success: true,
+			Output:  response,
+			Error:   nil,
+		}
+
+		if m.Callback != nil {
+			_ = m.Callback.OnComplete(req.TaskID, result)
+		}
+	}()
+
+	return nil
 }
 
 // SetResponse는 특정 taskID에 대한 응답을 설정합니다.

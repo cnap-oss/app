@@ -144,9 +144,9 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 			Prompt:   agent.Prompt,
 		}
 
-		// Runner 생성
+		// Runner 생성 (Controller를 callback으로 전달)
 		var err error
-		runner, err = c.runnerManager.CreateRunner(ctx, taskID, agentInfo)
+		runner, err = c.runnerManager.CreateRunner(ctx, taskID, agentInfo, c)
 		if err != nil {
 			c.logger.Error("Failed to create runner", zap.Error(err))
 			_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
@@ -204,17 +204,16 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 		})
 	}
 
-	// RunRequest 구성
+	// RunRequest 구성 (콜백은 Runner 생성 시 등록됨)
 	req := &taskrunner.RunRequest{
 		TaskID:       taskID,
 		Model:        agent.Model,
 		SystemPrompt: agent.Prompt,
 		Messages:     chatMessages,
-		Callback:     c,
 	}
 
-	// TaskRunner 실행 (callback이 상태 변경과 결과 저장 처리)
-	result, err := runner.Run(ctx, req)
+	// TaskRunner 실행 (비동기, 결과는 callback으로 처리됨)
+	err = runner.Run(ctx, req)
 
 	// Context 취소/타임아웃 확인
 	if ctx.Err() != nil {
@@ -245,21 +244,22 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 		return
 	}
 
-	// 로그 출력
+	// Run 시작 에러 확인 (비동기 실행이므로 시작 에러만 확인)
 	if err != nil {
-		c.logger.Error("TaskRunner execution failed",
+		c.logger.Error("Failed to start task execution",
 			zap.String("task_id", taskID),
 			zap.Error(err),
 		)
+		_ = c.repo.UpsertTaskStatus(context.Background(), taskID, task.AgentID, storage.TaskStatusFailed)
 		c.controllerEventChan <- ControllerEvent{
 			TaskID: taskID,
 			Status: "failed",
 			Error:  err,
 		}
 	} else {
-		c.logger.Info("Task execution completed",
+		c.logger.Info("Task execution started successfully",
 			zap.String("task_id", taskID),
-			zap.Bool("success", result != nil && result.Success),
 		)
 	}
+	// 실제 결과는 콜백(OnComplete/OnError)으로 처리됨
 }

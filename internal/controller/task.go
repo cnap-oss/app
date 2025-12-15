@@ -50,7 +50,7 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, prompt str
 		return err
 	}
 
-	// RunnerManager에 TaskRunner 생성
+	// RunnerManager에 TaskRunner 생성 (Controller를 callback으로 전달)
 	agentInfo := taskrunner.AgentInfo{
 		AgentID:  agentID,
 		Provider: agent.Provider,
@@ -58,7 +58,7 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, prompt str
 		Prompt:   agent.Prompt,
 	}
 
-	_, err = c.runnerManager.CreateRunner(ctx, taskID, agentInfo)
+	_, err = c.runnerManager.CreateRunner(ctx, taskID, agentInfo, c)
 	if err != nil {
 		c.logger.Error("Failed to create runner", zap.Error(err))
 		return fmt.Errorf("failed to create task runner: %w", err)

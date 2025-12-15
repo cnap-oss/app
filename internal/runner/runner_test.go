@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +14,71 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 )
+
+// MockStatusCallback은 테스트용 콜백 구현입니다.
+type MockStatusCallback struct {
+	mu               sync.Mutex
+	StartedCalled    bool
+	StartedSessionID string
+	CompletedCalled  bool
+	ErrorCalled      bool
+	Messages         []*RunnerMessage
+	Result           *RunResult
+	Error            error
+	Done             chan struct{}
+}
+
+func NewMockStatusCallback() *MockStatusCallback {
+	return &MockStatusCallback{
+		Messages: make([]*RunnerMessage, 0),
+		Done:     make(chan struct{}),
+	}
+}
+
+func (m *MockStatusCallback) OnStarted(taskID string, sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.StartedCalled = true
+	m.StartedSessionID = sessionID
+	return nil
+}
+
+func (m *MockStatusCallback) OnMessage(taskID string, msg *RunnerMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Messages = append(m.Messages, msg)
+	return nil
+}
+
+func (m *MockStatusCallback) OnComplete(taskID string, result *RunResult) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.CompletedCalled = true
+	m.Result = result
+	close(m.Done)
+	return nil
+}
+
+func (m *MockStatusCallback) OnError(taskID string, err error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ErrorCalled = true
+	m.Error = err
+	close(m.Done)
+	return nil
+}
+
+func (m *MockStatusCallback) GetTextContent() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var content strings.Builder
+	for _, msg := range m.Messages {
+		if msg.IsText() {
+			content.WriteString(msg.Content)
+		}
+	}
+	return content.String()
+}
 
 // TestRunWithResult_Success tests successful API call (레거시 OpenCode Zen API)
 func TestRunWithResult_Success(t *testing.T) {
@@ -67,7 +134,8 @@ func TestRunWithResult_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	callback := NewMockStatusCallback()
+	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, callback, zaptest.NewLogger(t), WithBaseURL(server.URL))
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -106,7 +174,8 @@ func TestRunWithResult_APIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	callback := NewMockStatusCallback()
+	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, callback, zaptest.NewLogger(t), WithBaseURL(server.URL))
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -132,7 +201,8 @@ func TestRunWithResult_HTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	callback := NewMockStatusCallback()
+	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, callback, zaptest.NewLogger(t), WithBaseURL(server.URL))
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -159,7 +229,8 @@ func TestRunWithResult_Timeout(t *testing.T) {
 
 	// Create client with very short timeout
 	client := &http.Client{Timeout: 100 * time.Millisecond}
-	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL), WithHTTPClient(client))
+	callback := NewMockStatusCallback()
+	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, callback, zaptest.NewLogger(t), WithBaseURL(server.URL), WithHTTPClient(client))
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -183,7 +254,8 @@ func TestRunWithResult_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, zaptest.NewLogger(t), WithBaseURL(server.URL))
+	callback := NewMockStatusCallback()
+	runner, err := NewRunner("test-task", AgentInfo{AgentID: "test-agent", Model: "grok-code"}, callback, zaptest.NewLogger(t), WithBaseURL(server.URL))
 	require.NoError(t, err)
 
 	// Create context with timeout
@@ -199,13 +271,13 @@ func TestRunWithResult_ContextCancellation(t *testing.T) {
 	assert.Contains(t, err.Error(), "API 요청 실패")
 }
 
-// TestRun_Success tests TaskRunner interface implementation with new OpenCode API
-func TestRun_Success(t *testing.T) {
+// TestRun_Async_Success tests async Run implementation with new OpenCode API
+func TestRun_Async_Success(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
 	sessionID := "ses_test123"
 
-	// Mock server for new OpenCode API
+	// Mock server for new OpenCode API with SSE support
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -225,56 +297,43 @@ func TestRun_Success(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(resp)
 
-		case r.Method == "POST" && r.URL.Path == "/session/"+sessionID+"/message":
-			// 프롬프트 전송
-			completed := int64(1234567900) // 완료 시간 설정
-			resp := PromptResponse{
-				Info: AssistantMessage{
-					ID:         "msg_123",
-					SessionID:  sessionID,
-					Role:       "assistant",
-					ParentID:   "msg_000",
-					ModelID:    "grok-code",
-					ProviderID: "anthropic",
-					Mode:       "code",
-					Path: MessagePath{
-						Cwd:  "/workspace",
-						Root: "/workspace",
-					},
-					Time: MessageTime{
-						Created:   1234567890,
-						Completed: &completed,
-					},
-					Cost: 0.01,
-					Tokens: MessageTokens{
-						Input:     100,
-						Output:    200,
-						Reasoning: 0,
-						Cache: MessageTokenCache{
-							Read:  0,
-							Write: 0,
-						},
-					},
-				},
-				Parts: []Part{
-					{
-						ID:        "prt_123",
-						SessionID: sessionID,
-						MessageID: "msg_123",
-						Type:      "text",
-						Text:      "test response",
+		case r.Method == "GET" && r.URL.Path == "/events":
+			// SSE 이벤트 스트림 (간단한 버전)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+
+			// 텍스트 이벤트 전송
+			event1 := Event{
+				Type: "message.part.updated",
+				Properties: map[string]interface{}{
+					"messageID": "msg_123",
+					"part": map[string]interface{}{
+						"id":   "prt_123",
+						"type": "text",
+						"text": "test response",
 					},
 				},
 			}
-			_ = json.NewEncoder(w).Encode(resp)
+			data1, _ := json.Marshal(event1)
+			_, _ = w.Write([]byte("data: " + string(data1) + "\n\n"))
 
-		case r.Method == "GET" && r.URL.Path == "/session/"+sessionID+"/message/msg_123":
-			// 메시지 조회 (폴링용)
+			// 완료 이벤트 전송
+			event2 := Event{
+				Type: "message.completed",
+				Properties: map[string]interface{}{
+					"messageID": "msg_123",
+				},
+			}
+			data2, _ := json.Marshal(event2)
+			_, _ = w.Write([]byte("data: " + string(data2) + "\n\n"))
+
+			w.(http.Flusher).Flush()
+
+		case r.Method == "POST" && r.URL.Path == "/session/"+sessionID+"/message":
+			// 프롬프트 전송
 			completed := int64(1234567900)
-			resp := struct {
-				Info  AssistantMessage `json:"info"`
-				Parts []Part           `json:"parts"`
-			}{
+			resp := PromptResponse{
 				Info: AssistantMessage{
 					ID:         "msg_123",
 					SessionID:  sessionID,
@@ -324,7 +383,10 @@ func TestRun_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "anthropic/grok-code"}, zaptest.NewLogger(t))
+	// Mock callback 생성
+	callback := NewMockStatusCallback()
+
+	runner, err := NewRunner("task-1", AgentInfo{AgentID: "test-agent", Model: "anthropic/grok-code"}, callback, zaptest.NewLogger(t))
 	require.NoError(t, err)
 	runner.Status = RunnerStatusReady
 	runner.BaseURL = server.URL
@@ -336,19 +398,27 @@ func TestRun_Success(t *testing.T) {
 		SystemPrompt: "You are a helpful assistant",
 		Messages: []ChatMessage{
 			{Role: "user", Content: "Hello"},
-			{Role: "assistant", Content: "Hi there"},
-			{Role: "user", Content: "How are you?"},
 		},
 	}
 
-	result, err := runner.Run(ctx, req)
-
+	// Run은 비동기로 즉시 반환
+	err = runner.Run(ctx, req)
 	require.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, "anthropic/grok-code", result.Agent)
-	assert.Equal(t, "task-1", result.Name)
-	assert.True(t, result.Success)
-	assert.Equal(t, "test response", result.Output)
+
+	// 완료 대기 (콜백으로 결과 수신)
+	select {
+	case <-callback.Done:
+		assert.True(t, callback.StartedCalled)
+		assert.Equal(t, sessionID, callback.StartedSessionID)
+		assert.True(t, callback.CompletedCalled)
+		assert.NotNil(t, callback.Result)
+		assert.Equal(t, "anthropic/grok-code", callback.Result.Agent)
+		assert.Equal(t, "task-1", callback.Result.Name)
+		assert.True(t, callback.Result.Success)
+		assert.Equal(t, "test response", callback.Result.Output)
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for callback")
+	}
 }
 
 // TestNewRunner_WithOptions tests Runner creation with options
@@ -358,9 +428,11 @@ func TestNewRunner_WithOptions(t *testing.T) {
 	customClient := &http.Client{Timeout: 5 * time.Second}
 	customBaseURL := "https://custom.api.example.com"
 
+	callback := NewMockStatusCallback()
 	runner, err := NewRunner(
 		"test-task",
 		AgentInfo{AgentID: "test-agent", Model: "grok-code"},
+		callback,
 		zaptest.NewLogger(t),
 		WithHTTPClient(customClient),
 		WithBaseURL(customBaseURL),
