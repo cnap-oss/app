@@ -85,7 +85,7 @@ func (c *Controller) handleExecuteEvent(ctx context.Context, event ConnectorEven
 	}
 
 	// Task 실행 (별도 함수로 분리하여 결과 처리)
-	c.executeTaskWithResult(ctx, event.TaskID, event.ThreadID, task)
+	go c.executeTaskWithEventEmit(ctx, event.TaskID, event.ThreadID, task)
 }
 
 // handleContinueEvent는 기존 Task에 메시지 추가 후 실행 계속 이벤트를 처리합니다.
@@ -145,8 +145,8 @@ func (c *Controller) handleContinueEvent(ctx context.Context, event ConnectorEve
 		return
 	}
 
-	// 4. Task 실행 (메시지 히스토리 포함) - executeTaskWithResult 재사용
-	c.executeTaskWithResult(ctx, taskID, threadID, task)
+	// 4. Task 실행 (메시지 히스토리 포함) - executeTaskWithEventEmit 재사용
+	go c.executeTaskWithEventEmit(ctx, taskID, threadID, task)
 }
 
 // handleCancelEvent는 Task 취소 이벤트를 처리합니다.

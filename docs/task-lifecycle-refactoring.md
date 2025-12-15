@@ -403,3 +403,60 @@ stateDiagram-v2
 
 - 동일 Task에 대한 동시 `continue` 이벤트 방지
 - `running` 상태에서 `continue` 이벤트 수신 시 에러 반환 (현재 구현 유지)
+
+---
+
+## 5. 최종 인터페이스 정의
+
+### 5.1 ConnectorEvent (Connector → Controller)
+
+| Type     | 설명                            | 사용 시점          |
+| -------- | ------------------------------- | ------------------ |
+| execute  | 새 Task 실행 시작               | Thread 첫 메시지   |
+| continue | 기존 Task에 메시지 추가 후 실행 | Thread 후속 메시지 |
+| cancel   | Task 취소                       | 사용자 취소 요청   |
+| complete | Task 명시적 완료                | 사용자 종료 요청   |
+
+### 5.2 ControllerEvent (Controller → Connector)
+
+| Status    | 설명                    | Task 상태 변화 |
+| --------- | ----------------------- | -------------- |
+| message   | 중간 응답 (Runner 응답) | waiting 유지   |
+| completed | Task 최종 완료          | completed      |
+| failed    | Task 실패               | failed         |
+| canceled  | Task 취소됨             | canceled       |
+
+### 5.3 Task 상태 전이
+
+```
+pending → running → waiting → running → ... → completed
+                 ↓                              ↑
+              failed ←--------------------------┘
+                 ↓
+              canceled
+```
+
+### 5.4 StatusCallback (Runner → Controller)
+
+| 메서드         | 설명                |
+| -------------- | ------------------- |
+| OnStatusChange | Task 상태 변경 알림 |
+| OnMessage      | 중간 응답 전달      |
+| OnComplete     | 실행 완료 알림      |
+| OnError        | 에러 발생 알림      |
+
+### 5.5 주요 함수 역할
+
+#### Controller Layer
+
+- `executeTaskWithEventEmit`: Task를 실행하고 결과를 ControllerEvent로 emit
+- `handleExecuteEvent`: 새 Task 실행 시작 (execute 이벤트 처리)
+- `handleContinueEvent`: 기존 Task 재실행 (continue 이벤트 처리)
+- `handleCancelEvent`: Task 취소 처리
+- `handleCompleteEvent`: Task 명시적 완료 처리
+
+#### Connector Layer
+
+- `executeThreadMessage`: Thread 메시지를 ConnectorEvent로 변환하여 Controller에 전달
+- `continueThreadMessage`: Thread 후속 메시지를 continue 이벤트로 전달
+- `handleTaskResult`: ControllerEvent를 수신하여 Discord에 응답
