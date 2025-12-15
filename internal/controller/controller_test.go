@@ -367,12 +367,13 @@ func TestControllerSendMessage_RunnerAutoRecreation(t *testing.T) {
 	assert.NotNil(t, runner, "Runner should be created after CreateTask")
 
 	// 3. Runner를 수동으로 삭제 (CLI 프로세스 재시작 시뮬레이션)
-	runnerMgr.DeleteRunner("task-recreate")
+	err := runnerMgr.DeleteRunner(ctx, "task-recreate")
+	require.NoError(t, err)
 	runner = runnerMgr.GetRunner("task-recreate")
 	assert.Nil(t, runner, "Runner should be deleted")
 
 	// 4. SendMessage 실행 - Runner가 자동으로 재생성되어야 함
-	err := ctrl.SendMessage(ctx, "task-recreate")
+	err = ctrl.SendMessage(ctx, "task-recreate")
 	assert.NoError(t, err, "SendMessage should succeed even without runner (auto-recreation)")
 
 	// 5. executeTask가 비동기로 실행되므로 잠시 대기

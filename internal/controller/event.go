@@ -186,7 +186,12 @@ func (c *Controller) handleCompleteEvent(ctx context.Context, event ConnectorEve
 	}
 
 	// 3. Runner 삭제 (명시적 완료 시에만)
-	c.runnerManager.DeleteRunner(taskID)
+	if err := c.runnerManager.DeleteRunner(ctx, taskID); err != nil {
+		c.logger.Warn("Failed to delete runner on complete",
+			zap.String("task_id", taskID),
+			zap.Error(err),
+		)
+	}
 
 	// 4. completed 이벤트 전송
 	c.controllerEventChan <- ControllerEvent{

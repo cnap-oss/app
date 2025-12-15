@@ -50,16 +50,26 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, prompt str
 		return err
 	}
 
-	// RunnerManager에 TaskRunner 생성 (logger 주입)
+	// RunnerManager에 TaskRunner 생성
 	agentInfo := taskrunner.AgentInfo{
 		AgentID:  agentID,
 		Provider: agent.Provider,
 		Model:    agent.Model,
 		Prompt:   agent.Prompt,
 	}
-	runner := c.runnerManager.CreateRunner(taskID, agentInfo, c.logger)
-	if runner == nil {
-		return fmt.Errorf("failed to create task runner")
+
+	_, err = c.runnerManager.CreateRunner(ctx, taskID, agentInfo)
+	if err != nil {
+		c.logger.Error("Failed to create runner", zap.Error(err))
+		return fmt.Errorf("failed to create task runner: %w", err)
+	}
+
+	// Runner 시작
+	if err := c.runnerManager.StartRunner(ctx, taskID); err != nil {
+		c.logger.Error("Failed to start runner", zap.Error(err))
+		// 생성된 Runner 정리
+		_ = c.runnerManager.DeleteRunner(ctx, taskID)
+		return fmt.Errorf("failed to start task runner: %w", err)
 	}
 
 	c.logger.Info("Task created successfully",
@@ -211,7 +221,12 @@ func (c *Controller) DeleteTask(ctx context.Context, taskID string) error {
 	}
 
 	// Runner도 삭제
-	c.runnerManager.DeleteRunner(taskID)
+	if err := c.runnerManager.DeleteRunner(ctx, taskID); err != nil {
+		c.logger.Warn("Failed to delete runner on task deletion",
+			zap.String("task_id", taskID),
+			zap.Error(err),
+		)
+	}
 
 	c.logger.Info("Task deleted successfully",
 		zap.String("task_id", taskID),

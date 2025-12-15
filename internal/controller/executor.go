@@ -143,7 +143,24 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 			Model:    agent.Model,
 			Prompt:   agent.Prompt,
 		}
-		runner = c.runnerManager.CreateRunner(taskID, agentInfo, c.logger)
+
+		// Runner 생성
+		var err error
+		runner, err = c.runnerManager.CreateRunner(ctx, taskID, agentInfo)
+		if err != nil {
+			c.logger.Error("Failed to create runner", zap.Error(err))
+			_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+			return
+		}
+
+		// Runner 시작
+		if err := c.runnerManager.StartRunner(ctx, taskID); err != nil {
+			c.logger.Error("Failed to start runner", zap.Error(err))
+			_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+			// 생성된 Runner 정리
+			_ = c.runnerManager.DeleteRunner(ctx, taskID)
+			return
+		}
 
 		c.logger.Info("Runner recreated successfully",
 			zap.String("task_id", taskID),
@@ -219,7 +236,12 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 		}
 
 		// 실행 완료 후 TaskRunner 정리
-		c.runnerManager.DeleteRunner(taskID)
+		if err := c.runnerManager.DeleteRunner(context.Background(), taskID); err != nil {
+			c.logger.Warn("Failed to delete runner",
+				zap.String("task_id", taskID),
+				zap.Error(err),
+			)
+		}
 		return
 	}
 
