@@ -96,7 +96,9 @@ func TestExecuteEvent(t *testing.T) {
 	defer cancel()
 
 	// Controller의 이벤트 루프 시작
-	go ctrl.Start(ctx)
+	go func() {
+		_ = ctrl.Start(ctx)
+	}()
 
 	// Agent 및 Task 생성
 	threadID := "thread-execute-test"
@@ -143,7 +145,9 @@ func TestContinueEvent(t *testing.T) {
 	defer cancel()
 
 	// Controller 이벤트 루프 시작
-	go ctrl.Start(ctx)
+	go func() {
+		_ = ctrl.Start(ctx)
+	}()
 
 	threadID := "thread-continue-test"
 
@@ -262,7 +266,9 @@ func TestCancelEvent(t *testing.T) {
 	defer cancel()
 
 	// Controller 이벤트 루프 시작
-	go ctrl.Start(ctx)
+	go func() {
+		_ = ctrl.Start(ctx)
+	}()
 
 	threadID := "thread-cancel-test"
 
@@ -322,7 +328,9 @@ func TestMultiTurnConversationFlow(t *testing.T) {
 	defer cancel()
 
 	// Controller 이벤트 루프 시작
-	go ctrl.Start(ctx)
+	go func() {
+		_ = ctrl.Start(ctx)
+	}()
 
 	threadID := "thread-multiturn-flow"
 

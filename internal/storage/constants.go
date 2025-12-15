@@ -7,11 +7,11 @@ const (
 	AgentStatusDeleted = "deleted"
 
 	// AI Provider types
-	ProviderOpenCode  = "opencode"
-	ProviderGemini    = "gemini"
-	ProviderClaude    = "claude"
-	ProviderOpenAI    = "openai"
-	ProviderXAI       = "xai"
+	ProviderOpenCode = "opencode"
+	ProviderGemini   = "gemini"
+	ProviderClaude   = "claude"
+	ProviderOpenAI   = "openai"
+	ProviderXAI      = "xai"
 
 	TaskStatusPending   = "pending"
 	TaskStatusRunning   = "running"

@@ -14,11 +14,11 @@ import (
 
 // Server는 Discord 봇의 세션, 로거, 에이전트 데이터 등 모든 상태를 관리하는 중앙 구조체입니다.
 type Server struct {
-	logger         *zap.Logger
-	session        *discordgo.Session
-	controller     *controller.Controller
-	threadsMutex   sync.RWMutex
-	activeThreads  map[string]string
+	logger              *zap.Logger
+	session             *discordgo.Session
+	controller          *controller.Controller
+	threadsMutex        sync.RWMutex
+	activeThreads       map[string]string
 	connectorEventChan  chan controller.ConnectorEvent
 	controllerEventChan <-chan controller.ControllerEvent
 }

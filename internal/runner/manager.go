@@ -38,7 +38,7 @@ func (rm *RunnerManager) CreateRunner(taskId string, agentInfo AgentInfo, logger
 
 	runner := NewRunner(logger, opts...)
 	runner.ID = taskId
-	runner.Status = "Pending" // Initial status
+	runner.Status = "Pending"    // Initial status
 	runner.agentInfo = agentInfo // Store AgentInfo including provider
 
 	rm.runners[taskId] = runner
