@@ -19,6 +19,7 @@ func (s *Server) controllerEventHandler(ctx context.Context) {
 			s.logger.Info("Received controller event",
 				zap.String("task_id", result.TaskID),
 				zap.String("status", result.Status),
+				zap.String("content", result.Content),
 			)
 			switch result.Status {
 			case "message":

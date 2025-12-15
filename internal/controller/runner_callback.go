@@ -47,6 +47,7 @@ func (c *Controller) OnComplete(taskID string, result *taskrunner.RunResult) err
 	c.logger.Info("OnComplete callback",
 		zap.String("task_id", taskID),
 		zap.Bool("success", result.Success),
+		zap.String("output", result.Output),
 	)
 
 	// 결과를 파일로 저장
@@ -64,6 +65,12 @@ func (c *Controller) OnComplete(taskID string, result *taskrunner.RunResult) err
 		}
 	}
 
+	c.controllerEventChan <- ControllerEvent{
+		TaskID:  taskID,
+		Status:  "completed",
+		Content: result.Output,
+	}
+
 	// 상태를 completed로 변경
 	return c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusCompleted)
 }
@@ -74,6 +81,12 @@ func (c *Controller) OnError(taskID string, err error) error {
 		zap.String("task_id", taskID),
 		zap.Error(err),
 	)
+
+	c.controllerEventChan <- ControllerEvent{
+		TaskID: taskID,
+		Status: "failed",
+		Error:  err,
+	}
 
 	// 상태를 failed로 변경
 	return c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusFailed)
