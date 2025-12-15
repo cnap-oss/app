@@ -540,6 +540,288 @@ Refs: FR-008
 
 ---
 
+## 2.7 세션 수명 관리 (Session Lifecycle)
+
+### 2.7.1 요구사항
+
+Runner의 세션 관리 방식을 변경하여 하나의 Runner가 하나의 세션을 유지하도록 개선합니다.
+
+**변경 전 (기존 방식)**:
+- Run() 호출 시마다 새로운 세션 생성
+- SSE 이벤트 구독도 Run() 호출마다 시작
+- Run() 완료 시 세션 삭제
+
+**변경 후 (개선 방식)**:
+- Start() 시점에 세션 생성 및 SSE 이벤트 구독 시작
+- Run() 호출 시 기존 세션 재사용
+- Stop() 시점에 세션 정리
+
+### 2.7.2 Runner 구조체 변경
+
+```go
+// internal/runner/runner.go
+
+type Runner struct {
+	// ... 기존 필드 ...
+
+	// 세션 관리 (Runner 생명 주기 동안 유지)
+	apiClient   *OpenCodeClient    // OpenCode API 클라이언트
+	session     *Session           // OpenCode 세션
+	sessionID   string             // 세션 ID
+	eventCtx    context.Context    // 이벤트 스트림 컨텍스트
+	eventCancel context.CancelFunc // 이벤트 스트림 취소 함수
+	eventDone   chan error         // 이벤트 스트림 완료 채널
+	fullContent *strings.Builder   // 누적 컨텐츠
+
+	// ... 나머지 필드 ...
+}
+```
+
+### 2.7.3 Start() 메서드 수정
+
+```go
+// internal/runner/runner.go
+
+func (r *Runner) Start(ctx context.Context) error {
+	// ... Container 시작 로직 ...
+
+	// OpenCode API 클라이언트 생성
+	r.apiClient = NewOpenCodeClient(
+		r.BaseURL,
+		WithOpenCodeHTTPClient(r.httpClient),
+		WithOpenCodeLogger(r.logger),
+	)
+
+	// 세션 생성
+	session, err := r.apiClient.CreateSession(ctx, &CreateSessionRequest{
+		Title: r.ID,
+	})
+	if err != nil {
+		r.Status = RunnerStatusFailed
+		_ = r.Stop(ctx)
+		return fmt.Errorf("세션 생성 실패: %w", err)
+	}
+	r.session = session
+	r.sessionID = session.ID
+
+	r.logger.Info("OpenCode 세션 생성됨",
+		zap.String("runner_id", r.ID),
+		zap.String("session_id", r.sessionID),
+	)
+
+	// 세션 생성 콜백 호출
+	if r.callback != nil {
+		if err := r.callback.OnStarted(r.ID, r.sessionID); err != nil {
+			r.logger.Warn("OnStarted 콜백 실패", zap.Error(err))
+		}
+	}
+
+	// 누적 컨텐츠 초기화
+	r.fullContent = &strings.Builder{}
+
+	// SSE 이벤트 구독 시작 (백그라운드에서 실행)
+	r.eventCtx, r.eventCancel = context.WithCancel(context.Background())
+	r.eventDone = make(chan error, 1)
+	
+	go func() {
+		err := r.apiClient.SubscribeEvents(r.eventCtx, r.handleEvent)
+		select {
+		case r.eventDone <- err:
+		default:
+		}
+	}()
+
+	// 이벤트 구독이 준비될 때까지 잠시 대기
+	time.Sleep(500 * time.Millisecond)
+
+	r.Status = RunnerStatusReady
+	return nil
+}
+```
+
+### 2.7.4 handleEvent() 메서드 추가
+
+```go
+// internal/runner/runner.go
+
+// handleEvent는 SSE 이벤트를 처리하는 핸들러입니다.
+// 이 메서드는 백그라운드 고루틴에서 실행되며, 모든 이벤트를 수신하여 처리합니다.
+func (r *Runner) handleEvent(event *Event) error {
+	r.logger.Debug("이벤트 수신",
+		zap.String("runner_id", r.ID),
+		zap.String("event_type", event.Type),
+	)
+
+	// SSE 이벤트를 RunnerMessage로 변환
+	msg := r.convertEventToMessage(event, r.sessionID)
+	if msg == nil {
+		return nil // 지원하지 않는 이벤트 타입
+	}
+
+	// 텍스트 이벤트인 경우 전체 컨텐츠에 추가
+	if msg.IsText() && msg.Content != "" && r.fullContent != nil {
+		r.fullContent.WriteString(msg.Content)
+	}
+
+	// 콜백으로 메시지 전달
+	if r.callback != nil {
+		if err := r.callback.OnMessage(r.ID, msg); err != nil {
+			r.logger.Warn("콜백 전달 실패",
+				zap.String("runner_id", r.ID),
+				zap.String("msg_type", string(msg.Type)),
+				zap.Error(err),
+			)
+		}
+	}
+
+	return nil
+}
+```
+
+### 2.7.5 Run() 메서드 수정
+
+```go
+// internal/runner/runner.go
+
+// runInternal은 실제 실행 로직을 담당합니다.
+// Start()에서 이미 세션이 생성되고 이벤트 구독이 시작되었으므로,
+// 여기서는 프롬프트만 전송하고 결과를 기다립니다.
+func (r *Runner) runInternal(ctx context.Context, req *RunRequest) (*RunResult, error) {
+	r.Status = RunnerStatusRunning
+	defer func() {
+		r.Status = RunnerStatusReady
+	}()
+
+	// 세션이 준비되었는지 확인
+	if r.sessionID == "" || r.apiClient == nil {
+		return nil, fmt.Errorf("세션이 준비되지 않음")
+	}
+
+	// 누적 컨텐츠 초기화 (새 실행 시작)
+	r.fullContent.Reset()
+
+	// 시스템 프롬프트와 메시지 결합
+	messages := r.buildMessages(req)
+
+	// 모델 정보 파싱
+	providerID, modelID := parseModel(req.Model)
+
+	// 메시지를 프롬프트 파트로 변환
+	parts := make([]PromptPart, 0, len(messages))
+	for _, msg := range messages {
+		parts = append(parts, TextPartInput{
+			Type: "text",
+			Text: msg.Content,
+		})
+	}
+
+	// 프롬프트 전송 (기존 세션 사용)
+	promptReq := &PromptRequest{
+		Model: &PromptModel{
+			ProviderID: providerID,
+			ModelID:    modelID,
+		},
+		Parts: parts,
+	}
+
+	_, err := r.apiClient.Prompt(ctx, r.sessionID, promptReq)
+	if err != nil {
+		return nil, fmt.Errorf("프롬프트 전송 실패: %w", err)
+	}
+
+	// 메시지 완료 대기 (이벤트는 백그라운드 handleEvent에서 처리 중)
+	eventWaitTimeout := 30 * time.Second
+	deadline := time.Now().Add(eventWaitTimeout)
+	
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// 현재까지 받은 컨텐츠 반환
+	output := r.fullContent.String()
+
+	result := &RunResult{
+		Agent:   req.Model,
+		Name:    req.TaskID,
+		Success: true,
+		Output:  output,
+		Error:   nil,
+	}
+
+	return result, nil
+}
+```
+
+### 2.7.6 Stop() 메서드 수정
+
+```go
+// internal/runner/runner.go
+
+func (r *Runner) Stop(ctx context.Context) error {
+	r.logger.Info("Stopping runner container",
+		zap.String("runner_id", r.ID),
+		zap.String("container_id", r.ContainerID),
+	)
+
+	r.Status = RunnerStatusStopping
+
+	// 이벤트 스트림 중지
+	if r.eventCancel != nil {
+		r.eventCancel()
+		r.eventCancel = nil
+	}
+
+	// 세션 삭제
+	if r.sessionID != "" && r.apiClient != nil {
+		if err := r.apiClient.DeleteSession(context.Background(), r.sessionID); err != nil {
+			r.logger.Warn("세션 삭제 실패",
+				zap.String("session_id", r.sessionID),
+				zap.Error(err),
+			)
+		}
+		r.sessionID = ""
+		r.session = nil
+	}
+
+	// ... Container 중지 로직 ...
+
+	r.Status = RunnerStatusStopped
+	return nil
+}
+```
+
+### 2.7.7 이점
+
+1. **세션 재사용**: 여러 Run() 호출 시 동일한 세션을 사용하여 컨텍스트 유지 가능
+2. **효율성 향상**: 매번 세션을 생성/삭제하는 오버헤드 제거
+3. **이벤트 지속성**: SSE 이벤트 스트림이 Runner 생명 주기 동안 유지되어 안정적
+4. **상태 관리 단순화**: 세션 상태가 Runner 상태와 일치
+
+### 2.7.8 커밋 포인트
+
+```
+refactor(runner): 세션 수명 관리를 Runner 수명과 일치시킴
+
+- Start() 시점에 세션 생성 및 SSE 이벤트 구독 시작
+- Run() 호출 시 기존 세션 재사용
+- handleEvent() 메서드로 백그라운드 이벤트 처리
+- Stop() 시점에 세션 정리
+
+이를 통해:
+- 세션 재사용으로 효율성 향상
+- 컨텍스트 유지 가능
+- 이벤트 스트림 안정성 개선
+
+Refs: FR-008
+```
+
+---
+
 ## 3. 구현 체크리스트
 
 ### 3.1 Phase 4a 구현 순서
