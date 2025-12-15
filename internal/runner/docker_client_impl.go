@@ -23,7 +23,7 @@ func NewDockerClient() (DockerClient, error) {
 		client.WithAPIVersionNegotiation(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("Docker 클라이언트 생성 실패: %w", err)
+		return nil, fmt.Errorf("docker 클라이언트 생성 실패: %w", err)
 	}
 
 	return &RealDockerClient{client: cli}, nil
@@ -89,7 +89,7 @@ func (d *RealDockerClient) CreateContainer(ctx context.Context, config Container
 		config.Name,
 	)
 	if err != nil {
-		return "", fmt.Errorf("Container 생성 실패: %w", err)
+		return "", fmt.Errorf("container 생성 실패: %w", err)
 	}
 
 	return resp.ID, nil
@@ -98,7 +98,7 @@ func (d *RealDockerClient) CreateContainer(ctx context.Context, config Container
 // StartContainer implements DockerClient.
 func (d *RealDockerClient) StartContainer(ctx context.Context, containerID string) error {
 	if err := d.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("Container 시작 실패: %w", err)
+		return fmt.Errorf("container 시작 실패: %w", err)
 	}
 	return nil
 }
@@ -111,7 +111,7 @@ func (d *RealDockerClient) StopContainer(ctx context.Context, containerID string
 	}
 
 	if err := d.client.ContainerStop(ctx, containerID, stopOptions); err != nil {
-		return fmt.Errorf("Container 중지 실패: %w", err)
+		return fmt.Errorf("container 중지 실패: %w", err)
 	}
 	return nil
 }
@@ -124,7 +124,7 @@ func (d *RealDockerClient) RemoveContainer(ctx context.Context, containerID stri
 	}
 
 	if err := d.client.ContainerRemove(ctx, containerID, removeOptions); err != nil {
-		return fmt.Errorf("Container 삭제 실패: %w", err)
+		return fmt.Errorf("container 삭제 실패: %w", err)
 	}
 	return nil
 }
@@ -140,7 +140,7 @@ func (d *RealDockerClient) ContainerLogs(ctx context.Context, containerID string
 
 	logs, err := d.client.ContainerLogs(ctx, containerID, options)
 	if err != nil {
-		return nil, fmt.Errorf("Container 로그 조회 실패: %w", err)
+		return nil, fmt.Errorf("container 로그 조회 실패: %w", err)
 	}
 
 	return logs, nil
@@ -150,7 +150,7 @@ func (d *RealDockerClient) ContainerLogs(ctx context.Context, containerID string
 func (d *RealDockerClient) ContainerInspect(ctx context.Context, containerID string) (ContainerInfo, error) {
 	inspect, err := d.client.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return ContainerInfo{}, fmt.Errorf("Container 조회 실패: %w", err)
+		return ContainerInfo{}, fmt.Errorf("container 조회 실패: %w", err)
 	}
 
 	// 포트 매핑 정보 추출
@@ -201,7 +201,7 @@ func (d *RealDockerClient) ContainerInspect(ctx context.Context, containerID str
 func (d *RealDockerClient) Ping(ctx context.Context) error {
 	_, err := d.client.Ping(ctx)
 	if err != nil {
-		return fmt.Errorf("Docker daemon 연결 실패: %w", err)
+		return fmt.Errorf("docker daemon 연결 실패: %w", err)
 	}
 	return nil
 }
@@ -218,7 +218,7 @@ func (d *RealDockerClient) Close() error {
 func GetContainerPort(ctx context.Context, dockerClient DockerClient, containerID string, containerPort string) (int, error) {
 	info, err := dockerClient.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return 0, fmt.Errorf("Container 조회 실패: %w", err)
+		return 0, fmt.Errorf("container 조회 실패: %w", err)
 	}
 
 	portKey := containerPort + "/tcp"
