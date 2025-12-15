@@ -297,8 +297,8 @@ func TestRun_Async_Success(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(resp)
 
-		case r.Method == "GET" && r.URL.Path == "/events":
-			// SSE 이벤트 스트림 (간단한 버전)
+		case r.Method == "GET" && r.URL.Path == "/event":
+			// SSE 이벤트 스트림 (/event 엔드포인트)
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("Connection", "keep-alive")

@@ -1,5 +1,7 @@
 # Runner 비동기 콜백 아키텍처 리팩토링 계획
 
+**상태: ✅ 완료** (2024-12-15)
+
 ## 개요
 
 이 문서는 Runner의 `runSync`, `runWithStreaming` 메서드를 삭제하고, TaskRunner 생성 시 콜백 핸들러를 컨트롤러가 러너에게 전달하도록 하여 `TaskRunner.Run` 함수가 완전히 비동기로 동작하도록 리팩토링하는 계획을 설명합니다.
@@ -1138,7 +1140,9 @@ func (m *MockStatusCallback) GetMessagesByType(taskID string, msgType taskrunner
 
 ## 마이그레이션 계획
 
-### Phase 1: 인터페이스 준비
+### Phase 1: 인터페이스 준비 ✅
+
+**상태: 완료**
 
 1. `RunnerMessage` 구조체 및 관련 타입 정의 추가:
    - `RunnerMessageType` enum 상수 정의
@@ -1150,7 +1154,9 @@ func (m *MockStatusCallback) GetMessagesByType(taskID string, msgType taskrunner
 4. Controller에 `OnStarted()` 및 새로운 `OnMessage()` 구현 추가
 5. 기존 테스트가 통과하는지 확인
 
-### Phase 2: Runner 구조체 변경
+### Phase 2: Runner 구조체 변경 ✅
+
+**상태: 완료**
 
 1. Runner에 콜백 필드 추가
 2. `NewRunner()` 함수에 콜백 파라미터 추가 (옵셔널로 시작)
@@ -1159,12 +1165,16 @@ func (m *MockStatusCallback) GetMessagesByType(taskID string, msgType taskrunner
 5. `Cancel()`, `GetStatus()` 메서드 추가
 6. 새 테스트 추가 (RunnerMessage 타입별 테스트 포함)
 
-### Phase 3: RunnerManager 변경
+### Phase 3: RunnerManager 변경 ✅
+
+**상태: 완료**
 
 1. `CreateRunner()`에 콜백 파라미터 추가
 2. 테스트 업데이트
 
-### Phase 4: Controller 변경
+### Phase 4: Controller 변경 ✅
+
+**상태: 완료**
 
 1. `CreateTask()`에서 콜백과 함께 Runner 생성
 2. `executeTask()`에서 `RunnerManager.GetRunner()` 후 직접 `runner.Run()` 호출로 변경
@@ -1176,7 +1186,9 @@ func (m *MockStatusCallback) GetMessagesByType(taskID string, msgType taskrunner
    - `Complete`: 완료 처리 (기존 로직과 연계)
 5. 테스트 업데이트
 
-### Phase 5: 레거시 코드 제거
+### Phase 5: 레거시 코드 제거 ✅
+
+**상태: 완료**
 
 1. `Runner.runSync()` 메서드 삭제
 2. `Runner.runWithStreaming()` 메서드 삭제
@@ -1185,12 +1197,14 @@ func (m *MockStatusCallback) GetMessagesByType(taskID string, msgType taskrunner
 5. 이전 `OnMessage(taskID, message string)` 시그니처 관련 코드 정리
 6. 관련 테스트 정리
 
-### Phase 6: 정리 및 문서화
+### Phase 6: 정리 및 문서화 ✅
 
-1. 코드 정리 및 주석 업데이트
-2. `RunnerMessage` 타입 및 사용 방법 문서화
-3. README 및 문서 업데이트
-4. 최종 테스트 실행
+**상태: 완료**
+
+1. ✅ 코드 정리 및 주석 업데이트
+2. ✅ `RunnerMessage` 타입 및 사용 방법 문서화
+3. ✅ README 및 문서 업데이트
+4. ✅ 최종 테스트 실행
 
 ## 리스크 및 고려사항
 
@@ -1226,9 +1240,73 @@ func (m *MockStatusCallback) GetMessagesByType(taskID string, msgType taskrunner
 
 **총 예상: +450줄, -550줄, ~180줄 수정**
 
+## 최종 구현 요약
+
+### 완료된 항목
+
+1. **RunnerMessage 타입 시스템** (Phase 1)
+   - `RunnerMessageType` 열거형 정의 (text, reasoning, tool_call, tool_result, complete, error 등)
+   - `RunnerMessage` 구조체로 SSE 이벤트 추상화
+   - `ToolCallInfo`, `ToolResultInfo`, `MessageErrorInfo` 보조 타입
+   - `IsText()`, `IsToolRelated()`, `IsTerminal()` 헬퍼 메서드
+   - 위치: [`internal/runner/api_types.go`](internal/runner/api_types.go)
+
+2. **StatusCallback 인터페이스 확장** (Phase 1)
+   - `OnStarted(taskID, sessionID)`: 세션 생성 시 호출
+   - `OnMessage(taskID, *RunnerMessage)`: SSE 이벤트 수신 시 호출
+   - `OnComplete(taskID, *RunResult)`: 성공 완료 시 호출
+   - `OnError(taskID, error)`: 에러 발생 시 호출
+   - 위치: [`internal/runner/runner.go`](internal/runner/runner.go)
+
+3. **Runner 비동기 실행** (Phase 2)
+   - `Run()` 메서드가 즉시 반환 (비동기)
+   - 콜백은 `NewRunner()` 생성자에서만 등록
+   - `runInternal()` 메서드에서 실제 실행
+   - `executeWithStreaming()` 메서드로 SSE 이벤트 처리
+   - `convertEventToMessage()` 메서드로 SSE → RunnerMessage 변환
+   - 위치: [`internal/runner/runner.go`](internal/runner/runner.go)
+
+4. **RunnerManager 콜백 전달** (Phase 3)
+   - `CreateRunner()` 메서드에 콜백 파라미터 추가
+   - 위치: [`internal/runner/manager.go`](internal/runner/manager.go)
+
+5. **Controller 콜백 구현** (Phase 4)
+   - [`internal/controller/runner_callback.go`](internal/controller/runner_callback.go)에 모든 콜백 메서드 구현
+   - `OnMessage()`에서 RunnerMessage 타입별 처리
+   - Task 상태 업데이트 및 이벤트 전송
+   - `CreateTask()`에서 콜백과 함께 Runner 생성
+
+6. **레거시 코드 제거** (Phase 5)
+   - `runSync()` 메서드 삭제
+   - `runWithStreaming()` 메서드 삭제 (로직은 executeWithStreaming으로 통합)
+   - `RunRequest.Callback` 필드 제거
+
+### 아키텍처 개선 효과
+
+1. **명확한 책임 분리**
+   - Runner: Task 실행만 담당
+   - Controller: 결과 처리 및 상태 관리
+   - 콜백을 통한 느슨한 결합
+
+2. **타입 안전성 향상**
+   - `RunnerMessage`로 SSE 이벤트 타입 명시
+   - 컴파일 타임에 타입 검증 가능
+
+3. **확장성 개선**
+   - 새로운 이벤트 타입 추가 용이
+   - 콜백 메서드 추가로 기능 확장 가능
+
+4. **테스트 용이성**
+   - Mock callback 구현으로 단위 테스트 간편
+   - 비동기 실행 테스트 패턴 확립
+
+5. **코드 단순화**
+   - runSync, runWithStreaming 중복 제거
+   - 단일 실행 경로로 유지보수 용이
+
 ## 결론
 
-이 리팩토링은 Runner의 실행 모델을 완전한 비동기 방식으로 전환하여 다음을 달성합니다:
+이 리팩토링은 Runner의 실행 모델을 완전한 비동기 방식으로 전환하여 다음을 달성했습니다:
 
 1. **코드 단순화**: runSync, runWithStreaming 제거로 중복 코드 감소
 2. **책임 분리**: Runner는 실행만, Controller는 결과 처리만 담당
@@ -1236,4 +1314,4 @@ func (m *MockStatusCallback) GetMessagesByType(taskID string, msgType taskrunner
 4. **테스트 용이성**: 비동기 실행과 콜백 기반으로 테스트 작성이 더 명확해짐
 5. **확장성**: 새로운 콜백 이벤트 추가가 용이
 
-계획된 6개 Phase를 통해 안전하게 마이그레이션하며, 각 Phase에서 테스트를 통해 안정성을 확보합니다.
+계획된 6개 Phase를 모두 완료했으며, 각 Phase에서 테스트를 통해 안정성을 확보했습니다.

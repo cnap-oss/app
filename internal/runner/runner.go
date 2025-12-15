@@ -16,9 +16,21 @@ import (
 )
 
 // TaskRunner는 Task 실행을 위한 인터페이스입니다.
+// 모든 TaskRunner 구현체는 비동기 실행을 지원해야 하며,
+// 실행 결과는 생성 시 등록된 콜백을 통해 전달됩니다.
 type TaskRunner interface {
 	// Run은 주어진 요청으로 비동기 실행을 시작합니다.
-	// 즉시 반환되며, 결과는 생성 시 등록된 콜백을 통해 전달됩니다.
+	// 이 메서드는 즉시 반환되며, 실행은 별도의 고루틴에서 진행됩니다.
+	// 실행 중 발생하는 이벤트와 최종 결과는 StatusCallback을 통해 전달됩니다.
+	//
+	// Parameters:
+	//   - ctx: 실행 컨텍스트 (취소 시그널 전달용)
+	//   - req: 실행 요청 (TaskID, Model, Messages 포함)
+	//
+	// Returns:
+	//   - error: 실행 시작 실패 시 에러 (nil이면 성공적으로 시작됨)
+	//
+	// 주의: 이 메서드는 실행 시작만 담당하며, 실행 완료를 기다리지 않습니다.
 	Run(ctx context.Context, req *RunRequest) error
 }
 
@@ -41,18 +53,58 @@ type AgentInfo struct {
 }
 
 // StatusCallback은 Task 실행 중 상태 변경을 Controller에 알리기 위한 콜백 인터페이스입니다.
+// Runner는 생성 시 이 콜백을 등록받아, 실행 중 발생하는 모든 이벤트를 이 인터페이스를 통해 전달합니다.
+//
+// 콜백 호출 순서:
+//  1. OnStarted - 세션 생성 및 실행 시작
+//  2. OnMessage - SSE 이벤트 수신 시 (여러 번 호출 가능)
+//  3. OnComplete 또는 OnError - 실행 종료
 type StatusCallback interface {
-	// OnStarted는 Runner가 시작되고 세션이 생성될 때 호출됩니다.
+	// OnStarted는 Runner가 시작되고 OpenCode 세션이 생성될 때 호출됩니다.
+	//
+	// Parameters:
+	//   - taskID: Task 식별자
+	//   - sessionID: OpenCode 세션 ID (예: "ses_xxx")
+	//
+	// Returns:
+	//   - error: 콜백 처리 실패 시 에러 (로깅용, Runner 실행에는 영향 없음)
 	OnStarted(taskID string, sessionID string) error
 
-	// OnMessage는 Runner가 중간 응답을 생성할 때 호출됩니다.
-	// 이를 통해 Controller가 Connector에 실시간으로 메시지를 전달할 수 있습니다.
+	// OnMessage는 Runner가 SSE 이벤트를 수신할 때 호출됩니다.
+	// 텍스트 스트리밍, 도구 호출, 상태 변경 등 다양한 이벤트를 실시간으로 전달합니다.
+	//
+	// Parameters:
+	//   - taskID: Task 식별자
+	//   - msg: RunnerMessage (Type 필드로 이벤트 종류 구분)
+	//
+	// Returns:
+	//   - error: 콜백 처리 실패 시 에러 (로깅용, Runner 실행에는 영향 없음)
+	//
+	// 주요 메시지 타입:
+	//   - MessageTypeText: 스트리밍 텍스트 청크
+	//   - MessageTypeToolCall: 도구 호출 시작
+	//   - MessageTypeToolResult: 도구 실행 결과
+	//   - MessageTypeComplete: 메시지 완료
 	OnMessage(taskID string, msg *RunnerMessage) error
 
-	// OnComplete는 Task가 완료될 때 호출됩니다.
+	// OnComplete는 Task가 성공적으로 완료될 때 호출됩니다.
+	//
+	// Parameters:
+	//   - taskID: Task 식별자
+	//   - result: 실행 결과 (전체 출력 텍스트 포함)
+	//
+	// Returns:
+	//   - error: 콜백 처리 실패 시 에러 (로깅용)
 	OnComplete(taskID string, result *RunResult) error
 
 	// OnError는 Task 실행 중 에러가 발생할 때 호출됩니다.
+	//
+	// Parameters:
+	//   - taskID: Task 식별자
+	//   - err: 발생한 에러
+	//
+	// Returns:
+	//   - error: 콜백 처리 실패 시 에러 (로깅용)
 	OnError(taskID string, err error) error
 }
 
@@ -422,8 +474,30 @@ func (r *Runner) waitForHealthy(ctx context.Context) error {
 // ensure Runner implements TaskRunner interface
 var _ TaskRunner = (*Runner)(nil)
 
-// Run implements TaskRunner interface.
-// 비동기로 실행을 시작하며, 결과는 콜백으로 전달됩니다.
+// Run은 TaskRunner 인터페이스를 구현하며, 비동기로 Task 실행을 시작합니다.
+//
+// 이 메서드는 즉시 반환되며, 실제 실행은 별도의 고루틴에서 진행됩니다.
+// 실행 중 발생하는 모든 이벤트는 생성 시 등록된 StatusCallback을 통해 전달됩니다.
+//
+// 실행 흐름:
+//  1. Runner 상태 및 요청 검증
+//  2. 고루틴 시작 (즉시 반환)
+//  3. [고루틴 내부] OpenCode API 세션 생성
+//  4. [고루틴 내부] SSE 이벤트 구독 및 프롬프트 전송
+//  5. [고루틴 내부] 이벤트 수신 및 콜백 호출
+//  6. [고루틴 내부] 완료 시 OnComplete 또는 OnError 호출
+//
+// Parameters:
+//   - ctx: 실행 컨텍스트 (고루틴에 전달되어 취소 시그널로 사용)
+//   - req: 실행 요청 (TaskID, Model, SystemPrompt, Messages 포함)
+//
+// Returns:
+//   - error: 실행 시작 실패 시 에러 (Runner 미준비, nil 요청 등)
+//
+// 주의사항:
+//   - 콜백은 반드시 NewRunner() 생성자에서 등록되어야 함
+//   - Runner 상태가 RunnerStatusReady가 아니면 실패
+//   - 에러 반환은 실행 시작 실패를 의미하며, 실행 중 에러는 OnError 콜백으로 전달됨
 func (r *Runner) Run(ctx context.Context, req *RunRequest) error {
 	if r.Status != RunnerStatusReady {
 		return fmt.Errorf("runner가 준비되지 않음 (status: %s)", r.Status)
@@ -639,7 +713,30 @@ func (r *Runner) executeWithStreaming(ctx context.Context, client *OpenCodeClien
 	return result, nil
 }
 
-// convertEventToMessage는 SSE Event를 RunnerMessage로 변환합니다.
+// convertEventToMessage는 OpenCode SSE Event를 RunnerMessage로 변환합니다.
+//
+// 이 메서드는 OpenCode API에서 수신한 원시 SSE 이벤트를 타입 안전한 RunnerMessage 구조체로 변환합니다.
+// 지원하지 않는 이벤트 타입이나 파트 타입은 nil을 반환하여 무시됩니다.
+//
+// 지원하는 SSE 이벤트:
+//   - "message.part.updated": 메시지 파트 업데이트 (text, reasoning, tool)
+//   - "message.completed": 메시지 완료
+//   - "session.aborted": 세션 중단
+//
+// 변환 규칙:
+//   - text 파트 → MessageTypeText (Content 필드에 텍스트)
+//   - reasoning 파트 → MessageTypeReasoning (Content 필드에 텍스트)
+//   - tool 파트 (pending/running) → MessageTypeToolCall (ToolCall 필드)
+//   - tool 파트 (completed/error) → MessageTypeToolResult (ToolResult 필드)
+//   - message.completed → MessageTypeComplete
+//   - session.aborted → MessageTypeSessionAborted
+//
+// Parameters:
+//   - event: OpenCode SSE 이벤트 (Type과 Properties 포함)
+//   - sessionID: 현재 세션 ID
+//
+// Returns:
+//   - *RunnerMessage: 변환된 메시지 (nil이면 지원하지 않는 이벤트)
 func (r *Runner) convertEventToMessage(event *Event, sessionID string) *RunnerMessage {
 	msg := &RunnerMessage{
 		SessionID: sessionID,
