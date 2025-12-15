@@ -14,6 +14,21 @@ import (
 	"go.uber.org/zap"
 )
 
+// TaskRunner는 Task 실행을 위한 인터페이스입니다.
+type TaskRunner interface {
+	// Run은 주어진 메시지들로 AI API를 호출하고 결과를 반환합니다.
+	Run(ctx context.Context, req *RunRequest) (*RunResult, error)
+}
+
+// RunRequest는 TaskRunner 실행 요청입니다.
+type RunRequest struct {
+	TaskID       string
+	Model        string
+	SystemPrompt string
+	Messages     []ChatMessage
+	Callback     StatusCallback // 중간 응답 콜백 (optional)
+}
+
 // AgentInfo는 에이전트 실행에 필요한 정보를 담는 구조체입니다.
 type AgentInfo struct {
 	AgentID  string
@@ -125,8 +140,56 @@ func NewRunner(logger *zap.Logger, opts ...RunnerOption) *Runner {
 	return r
 }
 
-// RunWithResult는 프롬프트를 OpenCode AI API 엔드포인트로 보내고 결과를 반환합니다.
-func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) (*RunResult, error) {
+// ensure Runner implements TaskRunner interface
+var _ TaskRunner = (*Runner)(nil)
+
+// Run implements TaskRunner interface.
+func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
+	r.logger.Info("Runner starting task", zap.String("messages", fmt.Sprintf("%+v", req.Messages)))
+	// 시스템 프롬프트와 메시지를 결합
+	messages := make([]ChatMessage, 0, len(req.Messages)+1)
+	if req.SystemPrompt != "" {
+		messages = append(messages, ChatMessage{
+			Role:    "system",
+			Content: req.SystemPrompt,
+		})
+	}
+	messages = append(messages, req.Messages...)
+
+	// 마지막 사용자 메시지를 prompt로 사용
+	var prompt string
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			prompt = messages[i].Content
+			break
+		}
+	}
+
+	// API 호출
+	result, err := r.Request(ctx, req.Model, req.TaskID, prompt)
+	if err != nil {
+		// 콜백이 있으면 에러 알림
+		if req.Callback != nil {
+			_ = req.Callback.OnError(req.TaskID, err)
+		}
+		return nil, err
+	}
+
+	// AI 응답 수신 완료 - 콜백으로 중간 응답 전달
+	if req.Callback != nil && result.Success && result.Output != "" {
+		if err := req.Callback.OnMessage(req.TaskID, result.Output); err != nil {
+			r.logger.Warn("Failed to send message callback",
+				zap.String("task_id", req.TaskID),
+				zap.Error(err),
+			)
+		}
+	}
+
+	return result, nil
+}
+
+// Request는 프롬프트를 OpenCode AI API 엔드포인트로 보내고 결과를 반환합니다.
+func (r *Runner) Request(ctx context.Context, model, name, prompt string) (*RunResult, error) {
 	promptPreview := prompt
 	if len(promptPreview) > 200 {
 		promptPreview = promptPreview[:200] + "..."
@@ -138,17 +201,11 @@ func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) 
 		zap.String("prompt_preview", promptPreview),
 	)
 
-	// OpenCode API 키 가져오기
-	apiKey := os.Getenv("OPEN_CODE_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("환경 변수 OPEN_CODE_API_KEY가 설정되어 있지 않습니다")
-	}
-
-	// OpenCode endpoint
-	endpoint := "https://opencode.ai/zen/v1/chat/completions"
+	// OpenCode endpoint - baseURL 사용 (테스트 시 mock server 사용 가능)
+	endpoint := r.baseURL + "/chat/completions"
 
 	// OpenCode API 호출 (OpenAI 호환 포맷)
-	return r.callOpenCodeAPI(ctx, endpoint, apiKey, model, name, prompt)
+	return r.callOpenCodeAPI(ctx, endpoint, r.apiKey, model, name, prompt)
 }
 
 // callOpenCodeAPI는 OpenCode API를 호출합니다 (OpenAI 호환 포맷).
