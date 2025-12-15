@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/cnap-oss/app/internal/common"
 	"go.uber.org/zap"
 )
 
@@ -51,10 +52,11 @@ type WorkspaceConfig struct {
 
 // DefaultWorkspaceConfig는 기본 Workspace 설정을 반환합니다.
 func DefaultWorkspaceConfig() WorkspaceConfig {
+	configsDir := common.GetConfigsDir()
 	return WorkspaceConfig{
-		BaseDir:           getEnvOrDefault("WORKSPACE_BASE_DIR", "./data/workspace"),
-		DefaultConfigPath: getEnvOrDefault("WORKSPACE_DEFAULT_CONFIG", "./data/configs/opencode/default-config.json"),
-		DefaultMCPPath:    getEnvOrDefault("WORKSPACE_DEFAULT_MCP", "./data/configs/opencode/default-mcp.json"),
+		BaseDir:           common.GetWorkspaceDir(),
+		DefaultConfigPath: getEnvOrDefault("WORKSPACE_DEFAULT_CONFIG", filepath.Join(configsDir, "opencode", "default-config.json")),
+		DefaultMCPPath:    getEnvOrDefault("WORKSPACE_DEFAULT_MCP", filepath.Join(configsDir, "opencode", "default-mcp.json")),
 		MaxDiskUsageMB:    getEnvOrDefaultInt64("WORKSPACE_MAX_DISK_MB", 1024),
 	}
 }
