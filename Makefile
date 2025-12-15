@@ -88,7 +88,12 @@ run-local: ## Run with SQLite (no Docker needed)
 dev: build ## Build and run locally with SQLite
 	@echo "Running $(BINARY_NAME) locally with SQLite..."
 	@mkdir -p $(SQLITE_DB_DIR)
-	@unset DATABASE_URL && ./$(BUILD_DIR)/$(BINARY_NAME) start
+	@if [ -f .env ]; then \
+		echo "Loading environment from .env file..."; \
+		export $$(cat .env | grep -v '^#' | xargs) && unset DATABASE_URL && ./$(BUILD_DIR)/$(BINARY_NAME) start; \
+	else \
+		unset DATABASE_URL && ./$(BUILD_DIR)/$(BINARY_NAME) start; \
+	fi
 
 test-local: ## Run tests with in-memory SQLite
 	@echo "Running tests with in-memory SQLite..."
