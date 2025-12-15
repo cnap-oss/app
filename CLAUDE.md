@@ -9,6 +9,7 @@ CNAP (Cloud Native AI Platform) is a Discord bot-based AI agent management syste
 ## Build and Test Commands
 
 ### Building
+
 ```bash
 # Build the binary
 make build
@@ -21,6 +22,7 @@ make build VERSION=v1.0.0
 ```
 
 ### Testing
+
 ```bash
 # Run all tests
 go test ./...
@@ -40,6 +42,7 @@ make test-coverage
 ```
 
 ### Linting and Formatting
+
 ```bash
 # Format code
 make fmt
@@ -52,6 +55,7 @@ make check
 ```
 
 ### Docker
+
 ```bash
 # Build Docker image
 make docker-build
@@ -71,11 +75,13 @@ docker compose -f docker/docker-compose.yml down
 ### Three-Layer Architecture
 
 1. **Connector Layer** (`internal/connector`)
+
    - Discord bot interface (not yet fully implemented)
    - Receives commands from Discord users
    - Translates Discord messages into task requests
 
 2. **Controller Layer** (`internal/controller`)
+
    - Central orchestration layer
    - Manages Agent and Task lifecycle
    - Handles state transitions and persistence
@@ -96,6 +102,7 @@ Agent (1) ──→ (N) Task ──→ (N) MessageIndex
 ```
 
 **Key Entities:**
+
 - `Agent`: Multi-tenant logical units (status: active, idle, busy, deleted)
 - `Task`: Execution units tied to agents (status: pending, running, completed, failed, canceled)
 - `MessageIndex`: File path references to JSON message bodies (not stored in DB)
@@ -105,6 +112,7 @@ Agent (1) ──→ (N) Task ──→ (N) MessageIndex
 ### Application Entry Points
 
 The `cnap` CLI has multiple commands:
+
 - `cnap start`: Starts both controller and connector servers in goroutines
 - `cnap health`: Health check endpoint for Docker
 - `cnap agent create <name>`: Create a new agent
@@ -113,6 +121,7 @@ The `cnap` CLI has multiple commands:
 ### Concurrent Server Execution
 
 The `start` command in `cmd/cnap/main.go` runs two servers concurrently:
+
 1. **Controller Server**: Heartbeat-based monitoring (actual task execution logic pending)
 2. **Connector Server**: Discord bot server (placeholder implementation)
 
@@ -121,14 +130,18 @@ Both use context-based cancellation and graceful shutdown with 30s timeout.
 ## Important Patterns
 
 ### Repository Pattern
+
 All storage operations go through `storage.Repository`. Never use `db.Create()` directly in controller logic. Always use repository methods like `CreateAgent()`, `CreateTask()`, etc.
 
 ### Status Constants
+
 Status values are defined in `internal/storage/constants.go`. Always use these constants:
+
 - Agent statuses: `AgentStatusActive`, `AgentStatusIdle`, `AgentStatusBusy`, `AgentStatusDeleted`
 - Task statuses: `TaskStatusPending`, `TaskStatusRunning`, `TaskStatusCompleted`, `TaskStatusFailed`, `TaskStatusCanceled`
 
 ### Testing Strategy
+
 - Use in-memory SQLite for unit tests (see `controller_test.go`)
 - Each test gets isolated database via `newTestController(t)` helper
 - Test both success and error paths (e.g., `TestControllerCreateTaskWithoutAgent`)
@@ -136,6 +149,7 @@ Status values are defined in `internal/storage/constants.go`. Always use these c
 ## Environment Variables
 
 ### Database Configuration
+
 - `DATABASE_URL`: PostgreSQL DSN (required, e.g., `postgres://user:pass@localhost:5432/cnap?sslmode=disable`)
 - `DB_LOG_LEVEL`: GORM log level (silent, error, warn, info) - default: warn
 - `DB_MAX_IDLE`: Connection pool idle count - default: 5
@@ -145,10 +159,12 @@ Status values are defined in `internal/storage/constants.go`. Always use these c
 - `DB_PREPARE_STMT`: Enable prepared statement cache - default: false
 
 ### Application Configuration
+
 - `ENV`: Environment (development, production)
 - `LOG_LEVEL`: Application log level (debug, info, warn, error)
 
 ### Docker Compose Variables
+
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`
 - `APP_ENV`, `APP_LOG_LEVEL`
 
@@ -157,6 +173,7 @@ Status values are defined in `internal/storage/constants.go`. Always use these c
 **Unified Container**: PostgreSQL and CNAP application run in a single container for simplified deployment.
 
 The startup script (`docker/start.sh`) performs:
+
 1. Initialize PostgreSQL (if first run)
 2. Configure PostgreSQL for remote access
 3. Start PostgreSQL in background
@@ -167,12 +184,13 @@ The startup script (`docker/start.sh`) performs:
 ## Git Workflow
 
 This project uses:
+
 - **Conventional Commits**: Prefix commits with `feat:`, `fix:`, `refactor:`, `test:`, `chore:`, `docs:`
-- **Issue-based branches**: `hyun/<issue-number>` (e.g., `hyun/8`)
+- **Issue-based branches**: `<user>/<issue-number>` (e.g., `hyun/8`)
 - **Korean commit messages**: Commit body and PR descriptions are in Korean
-- **Author**: Commits should be authored by `dwl21 <dwl21@example.com>`
 
 Example commit:
+
 ```
 feat(controller): Task 관리 메서드 구현
 
@@ -185,6 +203,7 @@ Closes #8
 ## Current Implementation Status
 
 ### ✅ Implemented
+
 - Agent CRUD operations
 - Task CRUD operations
 - Storage layer with GORM
@@ -193,6 +212,7 @@ Closes #8
 - Basic CLI structure
 
 ### 🚧 Pending Implementation
+
 - Discord bot integration (connector is placeholder)
 - Actual task execution in controller
 - Message processing and storage
@@ -203,6 +223,7 @@ Closes #8
 ## Next Development Steps
 
 To implement Discord bot functionality:
+
 1. Add `github.com/bwmarrin/discordgo` dependency
 2. Implement Discord event handlers in `internal/connector/server.go`
 3. Create communication channel between Connector and Controller
