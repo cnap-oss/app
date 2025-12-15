@@ -137,16 +137,10 @@ func WithWorkspacePath(path string) RunnerOption {
 	}
 }
 
-// OpenCodeRequest는 OpenCode Zen API 요청 바디입니다.
+// OpenCodeRequest는 OpenCode Zen API 요청 바디입니다 (레거시).
 type OpenCodeRequest struct {
 	Model    string        `json:"model"`
 	Messages []ChatMessage `json:"messages"`
-}
-
-// ChatMessage는 OpenCode Zen API 요청 바디의 messages 필드입니다.
-type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
 }
 
 // OpenCodeResponse는 OpenCode Zen API 응답 바디입니다.
@@ -475,75 +469,168 @@ func (r *Runner) buildMessages(req *RunRequest) []ChatMessage {
 
 // runSync는 동기 모드로 실행합니다.
 func (r *Runner) runSync(ctx context.Context, client *OpenCodeClient, req *RunRequest, messages []ChatMessage) (*RunResult, error) {
-	chatReq := &ChatRequest{
-		Model:    req.Model,
-		Messages: messages,
-		Stream:   false,
+	// 1. 세션 생성
+	session, err := client.CreateSession(ctx, &CreateSessionRequest{
+		Title: req.TaskID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("세션 생성 실패: %w", err)
 	}
 
-	resp, err := client.Chat(ctx, chatReq)
+	// 세션 종료는 defer로 처리
+	defer func() {
+		if err := client.DeleteSession(context.Background(), session.ID); err != nil {
+			r.logger.Warn("세션 삭제 실패",
+				zap.String("session_id", session.ID),
+				zap.Error(err),
+			)
+		}
+	}()
+
+	// 2. 모델 정보 파싱 (예: "anthropic/claude-3-5-sonnet-20241022")
+	providerID, modelID := parseModel(req.Model)
+
+	// 3. 메시지를 프롬프트 파트로 변환
+	parts := make([]PromptPart, 0, len(messages))
+	for _, msg := range messages {
+		parts = append(parts, TextPartInput{
+			Type: "text",
+			Text: msg.Content,
+		})
+	}
+
+	// 4. 프롬프트 전송
+	promptReq := &PromptRequest{
+		Model: &PromptModel{
+			ProviderID: providerID,
+			ModelID:    modelID,
+		},
+		Parts: parts,
+	}
+
+	resp, err := client.Prompt(ctx, session.ID, promptReq)
 	if err != nil {
-		return nil, fmt.Errorf("chat API 호출 실패: %w", err)
+		return nil, fmt.Errorf("프롬프트 전송 실패: %w", err)
+	}
+
+	// 5. 응답에서 텍스트 추출
+	var output strings.Builder
+	for _, part := range resp.Parts {
+		if part.Type == "text" {
+			output.WriteString(part.Text)
+		}
 	}
 
 	return &RunResult{
-		Agent:   resp.Model,
+		Agent:   req.Model,
 		Name:    req.TaskID,
 		Success: true,
-		Output:  resp.Response.Content,
+		Output:  output.String(),
 		Error:   nil,
 	}, nil
 }
 
-// runWithStreaming는 스트리밍 모드로 실행합니다.
+// runWithStreaming는 스트리밍 모드로 실행합니다 (이벤트 구독 사용).
 func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, req *RunRequest, messages []ChatMessage) (*RunResult, error) {
-	chatReq := &ChatRequest{
-		Model:    req.Model,
-		Messages: messages,
-		Stream:   true,
+	// 1. 세션 생성
+	session, err := client.CreateSession(ctx, &CreateSessionRequest{
+		Title: req.TaskID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("세션 생성 실패: %w", err)
 	}
 
+	defer func() {
+		if err := client.DeleteSession(context.Background(), session.ID); err != nil {
+			r.logger.Warn("세션 삭제 실패",
+				zap.String("session_id", session.ID),
+				zap.Error(err),
+			)
+		}
+	}()
+
+	// 2. 이벤트 구독 시작 (비동기)
 	var fullContent strings.Builder
-	var lastModel string
+	eventCtx, cancelEvent := context.WithCancel(ctx)
+	defer cancelEvent()
 
-	handler := func(event *ChatStreamEvent) error {
-		switch event.Event {
-		case "message":
-			// 부분 응답 처리
-			if event.Data.Content != "" {
-				fullContent.WriteString(event.Data.Content)
+	eventDone := make(chan error, 1)
+	go func() {
+		err := client.SubscribeEvents(eventCtx, func(event *Event) error {
+			// message.part.updated 이벤트 처리
+			if event.Type == "message.part.updated" {
+				if props, ok := event.Properties["part"].(map[string]interface{}); ok {
+					if partType, ok := props["type"].(string); ok && partType == "text" {
+						if text, ok := props["text"].(string); ok {
+							fullContent.WriteString(text)
 
-				// 콜백으로 중간 응답 전달
-				if err := req.Callback.OnMessage(req.TaskID, event.Data.Content); err != nil {
-					r.logger.Warn("콜백 전달 실패",
-						zap.String("task_id", req.TaskID),
-						zap.Error(err),
-					)
+							// 콜백으로 중간 응답 전달
+							if req.Callback != nil {
+								if err := req.Callback.OnMessage(req.TaskID, text); err != nil {
+									r.logger.Warn("콜백 전달 실패",
+										zap.String("task_id", req.TaskID),
+										zap.Error(err),
+									)
+								}
+							}
+						}
+					}
 				}
 			}
-		case "done":
-			// 완료 처리
-			r.logger.Debug("스트리밍 완료",
-				zap.String("task_id", req.TaskID),
-				zap.String("finish_reason", event.Data.FinishReason),
-			)
-		case "error":
-			return fmt.Errorf("스트리밍 에러: %s", event.Data.Error)
-		}
-		return nil
+			return nil
+		})
+		eventDone <- err
+	}()
+
+	// 잠시 대기 (이벤트 구독 준비)
+	time.Sleep(500 * time.Millisecond)
+
+	// 3. 모델 정보 파싱
+	providerID, modelID := parseModel(req.Model)
+
+	// 4. 메시지를 프롬프트 파트로 변환
+	parts := make([]PromptPart, 0, len(messages))
+	for _, msg := range messages {
+		parts = append(parts, TextPartInput{
+			Type: "text",
+			Text: msg.Content,
+		})
 	}
 
-	err := client.ChatStream(ctx, chatReq, handler)
+	// 5. 프롬프트 전송
+	promptReq := &PromptRequest{
+		Model: &PromptModel{
+			ProviderID: providerID,
+			ModelID:    modelID,
+		},
+		Parts: parts,
+	}
+
+	_, err = client.Prompt(ctx, session.ID, promptReq)
 	if err != nil {
-		// 에러 콜백
+		cancelEvent()
 		if req.Callback != nil {
 			_ = req.Callback.OnError(req.TaskID, err)
 		}
-		return nil, fmt.Errorf("chat stream 실패: %w", err)
+		return nil, fmt.Errorf("프롬프트 전송 실패: %w", err)
+	}
+
+	// 6. 이벤트 수신 완료 대기 (타임아웃 설정)
+	select {
+	case err := <-eventDone:
+		if err != nil && err != context.Canceled {
+			r.logger.Warn("이벤트 스트림 에러",
+				zap.String("task_id", req.TaskID),
+				zap.Error(err),
+			)
+		}
+	case <-time.After(5 * time.Second):
+		// 타임아웃 - 정상 동작으로 간주
+		cancelEvent()
 	}
 
 	result := &RunResult{
-		Agent:   lastModel,
+		Agent:   req.Model,
 		Name:    req.TaskID,
 		Success: true,
 		Output:  fullContent.String(),
@@ -561,6 +648,16 @@ func (r *Runner) runWithStreaming(ctx context.Context, client *OpenCodeClient, r
 	}
 
 	return result, nil
+}
+
+// parseModel은 "provider/model" 형식의 모델 문자열을 파싱합니다.
+func parseModel(model string) (providerID, modelID string) {
+	parts := strings.SplitN(model, "/", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	// 기본값
+	return "anthropic", model
 }
 
 // Request는 메시지 배열을 OpenCode AI API 엔드포인트로 보내고 결과를 반환합니다.
