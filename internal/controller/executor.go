@@ -233,8 +233,9 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 	c.runnerManager.DeleteRunner(taskID)
 }
 
-// executeTaskWithResult는 Task를 실행하고 결과를 resultChan으로 전송합니다.
-func (c *Controller) executeTaskWithResult(ctx context.Context, taskID, threadID string, task *storage.Task) {
+// executeTaskWithEventEmit는 Task를 실행하고 결과를 ControllerEvent로 emit합니다.
+// 이 함수는 goroutine에서 실행되며, 실행 완료 시 ControllerEvent를 전송합니다.
+func (c *Controller) executeTaskWithEventEmit(ctx context.Context, taskID, threadID string, task *storage.Task) {
 	defer func() {
 		// TaskContext 정리
 		c.mu.Lock()
