@@ -67,22 +67,16 @@ type StatusCallback interface {
 	//   - error: 콜백 처리 실패 시 에러 (로깅용, Runner 실행에는 영향 없음)
 	OnStarted(taskID string, sessionID string) error
 
-	// OnMessage는 Runner가 SSE 이벤트를 수신할 때 호출됩니다.
+	// OnEvent는 Runner가 SSE 이벤트를 수신할 때 호출됩니다.
 	// 텍스트 스트리밍, 도구 호출, 상태 변경 등 다양한 이벤트를 실시간으로 전달합니다.
 	//
 	// Parameters:
 	//   - taskID: Task 식별자
-	//   - msg: RunnerMessage (Type 필드로 이벤트 종류 구분)
+	//   - event: Event (원시 SSE 이벤트)
 	//
 	// Returns:
 	//   - error: 콜백 처리 실패 시 에러 (로깅용, Runner 실행에는 영향 없음)
-	//
-	// 주요 메시지 타입:
-	//   - MessageTypeText: 스트리밍 텍스트 청크
-	//   - MessageTypeToolCall: 도구 호출 시작
-	//   - MessageTypeToolResult: 도구 실행 결과
-	//   - MessageTypeComplete: 메시지 완료
-	OnMessage(taskID string, msg *RunnerMessage) error
+	OnEvent(taskID string, event *Event) error
 
 	// OnComplete는 Task가 성공적으로 완료될 때 호출됩니다.
 	//
@@ -497,30 +491,18 @@ func (r *Runner) Stop(ctx context.Context) error {
 // handleEvent는 SSE 이벤트를 처리하는 핸들러입니다.
 // 이 메서드는 백그라운드 고루틴에서 실행되며, 모든 이벤트를 수신하여 처리합니다.
 func (r *Runner) handleEvent(event *Event) error {
-	r.logger.Info("이벤트 수신",
+	r.logger.Debug("이벤트 수신",
 		zap.String("runner_id", r.ID),
 		zap.String("event_type", event.Type),
 		zap.Any("properties", event.Properties),
 	)
 
-	// SSE 이벤트를 RunnerMessage로 변환
-	msg := r.convertEventToMessage(event, r.sessionID)
-	if msg == nil {
-		return nil // 지원하지 않는 이벤트 타입
-	}
-
-	// 텍스트 이벤트인 경우 전체 컨텐츠에 추가
-	if msg.IsText() && msg.Content != "" && r.fullContent != nil {
-		r.fullContent.WriteString(msg.Content)
-	}
-
-	// 콜백으로 메시지 전달
+	// 콜백으로 이벤트 전달
 	if r.callback != nil {
-		// 현재 실행 중인 task ID를 사용하기 위해 runner ID 사용
-		if err := r.callback.OnMessage(r.ID, msg); err != nil {
+		if err := r.callback.OnEvent(r.ID, event); err != nil {
 			r.logger.Warn("콜백 전달 실패",
 				zap.String("runner_id", r.ID),
-				zap.String("msg_type", string(msg.Type)),
+				zap.String("event_type", event.Type),
 				zap.Error(err),
 			)
 		}
@@ -692,119 +674,6 @@ func (r *Runner) runInternal(ctx context.Context, req *RunRequest) error {
 	}
 
 	return nil
-}
-
-// convertEventToMessage는 OpenCode SSE Event를 RunnerMessage로 변환합니다.
-//
-// 이 메서드는 OpenCode API에서 수신한 원시 SSE 이벤트를 타입 안전한 RunnerMessage 구조체로 변환합니다.
-// 지원하지 않는 이벤트 타입이나 파트 타입은 nil을 반환하여 무시됩니다.
-//
-// 지원하는 SSE 이벤트:
-//   - "message.part.updated": 메시지 파트 업데이트 (text, reasoning, tool)
-//   - "message.completed": 메시지 완료
-//   - "session.aborted": 세션 중단
-//
-// 변환 규칙:
-//   - text 파트 → MessageTypeText (Content 필드에 텍스트)
-//   - reasoning 파트 → MessageTypeReasoning (Content 필드에 텍스트)
-//   - tool 파트 (pending/running) → MessageTypeToolCall (ToolCall 필드)
-//   - tool 파트 (completed/error) → MessageTypeToolResult (ToolResult 필드)
-//   - message.completed → MessageTypeComplete
-//   - session.aborted → MessageTypeSessionAborted
-//
-// Parameters:
-//   - event: OpenCode SSE 이벤트 (Type과 Properties 포함)
-//   - sessionID: 현재 세션 ID
-//
-// Returns:
-//   - *RunnerMessage: 변환된 메시지 (nil이면 지원하지 않는 이벤트)
-func (r *Runner) convertEventToMessage(event *Event, sessionID string) *RunnerMessage {
-	msg := &RunnerMessage{
-		SessionID: sessionID,
-		Timestamp: time.Now(),
-		RawEvent:  event,
-	}
-
-	switch event.Type {
-	case "message.part.updated":
-		// 파트 정보 추출
-		if props, ok := event.Properties["part"].(map[string]interface{}); ok {
-			partType, _ := props["type"].(string)
-			partID, _ := props["id"].(string)
-			messageID, _ := event.Properties["messageID"].(string)
-
-			msg.PartID = partID
-			msg.MessageID = messageID
-
-			switch partType {
-			case "text":
-				msg.Type = MessageTypeText
-				// delta 필드가 있으면 부분 업데이트
-				if delta, hasDelta := event.Properties["delta"].(string); hasDelta {
-					msg.Delta = delta
-					msg.IsPartial = true
-				} else {
-					msg.Content, _ = props["text"].(string)
-					msg.IsPartial = false
-				}
-			case "reasoning":
-				msg.Type = MessageTypeReasoning
-				// delta 필드가 있으면 부분 업데이트
-				if delta, hasDelta := event.Properties["delta"].(string); hasDelta {
-					msg.Delta = delta
-					msg.IsPartial = true
-				} else {
-					msg.Content, _ = props["text"].(string)
-					msg.IsPartial = false
-				}
-			case "tool":
-				// 도구 상태 확인
-				if state, ok := props["state"].(map[string]interface{}); ok {
-					status, _ := state["status"].(string)
-					callID, _ := props["callID"].(string)
-					tool, _ := props["tool"].(string)
-
-					if status == "running" || status == "pending" {
-						msg.Type = MessageTypeToolCall
-						msg.ToolCall = &ToolCallInfo{
-							ToolID:   callID,
-							ToolName: tool,
-						}
-						if input, ok := state["input"].(map[string]interface{}); ok {
-							msg.ToolCall.Arguments = input
-						}
-					} else {
-						msg.Type = MessageTypeToolResult
-						msg.ToolResult = &ToolResultInfo{
-							ToolID:   callID,
-							ToolName: tool,
-							Result:   "",
-							IsError:  status == "error",
-						}
-						if output, ok := state["output"].(string); ok {
-							msg.ToolResult.Result = output
-						}
-					}
-				}
-			default:
-				return nil // 지원하지 않는 파트 타입
-			}
-		}
-
-	case "message.completed":
-		msg.Type = MessageTypeComplete
-		if messageID, ok := event.Properties["messageID"].(string); ok {
-			msg.MessageID = messageID
-		}
-
-	case "session.aborted":
-		msg.Type = MessageTypeSessionAborted
-
-	default:
-		return nil // 지원하지 않는 이벤트 타입
-	}
-
-	return msg
 }
 
 // buildMessages는 요청 메시지를 구성합니다.

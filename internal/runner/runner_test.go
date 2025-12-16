@@ -22,7 +22,7 @@ type MockStatusCallback struct {
 	StartedSessionID string
 	CompletedCalled  bool
 	ErrorCalled      bool
-	Messages         []*RunnerMessage
+	Events           []*Event
 	Result           *RunResult
 	Error            error
 	Done             chan struct{}
@@ -30,8 +30,8 @@ type MockStatusCallback struct {
 
 func NewMockStatusCallback() *MockStatusCallback {
 	return &MockStatusCallback{
-		Messages: make([]*RunnerMessage, 0),
-		Done:     make(chan struct{}),
+		Events: make([]*Event, 0),
+		Done:   make(chan struct{}),
 	}
 }
 
@@ -43,10 +43,10 @@ func (m *MockStatusCallback) OnStarted(taskID string, sessionID string) error {
 	return nil
 }
 
-func (m *MockStatusCallback) OnMessage(taskID string, msg *RunnerMessage) error {
+func (m *MockStatusCallback) OnEvent(taskID string, event *Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Messages = append(m.Messages, msg)
+	m.Events = append(m.Events, event)
 	return nil
 }
 
@@ -72,9 +72,16 @@ func (m *MockStatusCallback) GetTextContent() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var content strings.Builder
-	for _, msg := range m.Messages {
-		if msg.IsText() {
-			content.WriteString(msg.Content)
+	for _, event := range m.Events {
+		// text 파트에서 텍스트 추출
+		if event.Type == "message.part.updated" {
+			if props, ok := event.Properties["part"].(map[string]interface{}); ok {
+				if partType, _ := props["type"].(string); partType == "text" {
+					if text, ok := props["text"].(string); ok {
+						content.WriteString(text)
+					}
+				}
+			}
 		}
 	}
 	return content.String()
