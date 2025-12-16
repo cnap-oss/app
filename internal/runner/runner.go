@@ -441,7 +441,31 @@ func (r *Runner) Stop(ctx context.Context) error {
 		zap.String("container_id", r.ContainerID),
 	)
 
+	// 정상 종료 상태 확인 (Ready 또는 Running 상태에서 Stop 호출 시)
+	shouldComplete := r.Status == RunnerStatusReady || r.Status == RunnerStatusRunning
+
 	r.Status = RunnerStatusStopping
+
+	// 정상 종료 시 OnComplete 콜백 호출
+	if shouldComplete && r.callback != nil {
+		r.logger.Info("Runner stopping normally, calling OnComplete",
+			zap.String("runner_id", r.ID),
+		)
+
+		output := ""
+		if r.fullContent != nil {
+			output = r.fullContent.String()
+		}
+
+		result := &RunResult{
+			Success: true,
+			Output:  output,
+		}
+
+		if err := r.callback.OnComplete(r.ID, result); err != nil {
+			r.logger.Warn("OnComplete 콜백 실패", zap.Error(err))
+		}
+	}
 
 	// 이벤트 스트림 중지
 	if r.eventCancel != nil {
