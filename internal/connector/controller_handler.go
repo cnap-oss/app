@@ -189,19 +189,58 @@ func (s *Server) sendMessageToDiscord(result controller.ControllerEvent) {
 	}
 
 	content := result.Content
+	const maxLength = 2000
 
-	// 일반 메시지로 전송 (Embed 없이)
-	_, err := s.session.ChannelMessageSend(result.TaskID, content)
-	if err != nil {
-		s.logger.Error("Failed to send message to Discord",
+	// content가 2000자 이하면 그대로 전송
+	if len(content) <= maxLength {
+		_, err := s.session.ChannelMessageSend(result.TaskID, content)
+		if err != nil {
+			s.logger.Error("Failed to send message to Discord",
+				zap.String("task_id", result.TaskID),
+				zap.Error(err),
+			)
+		} else {
+			s.logger.Debug("Message sent to Discord",
+				zap.String("task_id", result.TaskID),
+			)
+		}
+		return
+	}
+
+	// content가 2000자를 초과하면 여러 메시지로 분할 전송
+	s.logger.Info("Splitting long message",
+		zap.String("task_id", result.TaskID),
+		zap.Int("total_length", len(content)),
+		zap.Int("chunks", (len(content)+maxLength-1)/maxLength),
+	)
+
+	for i := 0; i < len(content); i += maxLength {
+		end := i + maxLength
+		if end > len(content) {
+			end = len(content)
+		}
+
+		chunk := content[i:end]
+		_, err := s.session.ChannelMessageSend(result.TaskID, chunk)
+		if err != nil {
+			s.logger.Error("Failed to send message chunk to Discord",
+				zap.String("task_id", result.TaskID),
+				zap.Int("chunk_index", i/maxLength),
+				zap.Error(err),
+			)
+			return
+		}
+
+		s.logger.Debug("Message chunk sent to Discord",
 			zap.String("task_id", result.TaskID),
-			zap.Error(err),
-		)
-	} else {
-		s.logger.Debug("Message sent to Discord",
-			zap.String("task_id", result.TaskID),
+			zap.Int("chunk_index", i/maxLength),
+			zap.Int("chunk_length", len(chunk)),
 		)
 	}
+
+	s.logger.Info("All message chunks sent successfully",
+		zap.String("task_id", result.TaskID),
+	)
 }
 
 // sendResultToDiscord는 Task 실행 결과를 Discord Thread에 전송합니다.
