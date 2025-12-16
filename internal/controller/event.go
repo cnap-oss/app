@@ -192,6 +192,9 @@ func (c *Controller) handleCompleteEvent(ctx context.Context, event ConnectorEve
 			zap.Error(err),
 		)
 	}
+	
+	// 4. TaskContext 정리 (Runner와 생명주기 일치)
+	c.cleanupTaskContext(taskID)
 
 	// 4. completed 이벤트 전송
 	c.controllerEventChan <- ControllerEvent{

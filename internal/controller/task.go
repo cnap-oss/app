@@ -228,6 +228,9 @@ func (c *Controller) DeleteTask(ctx context.Context, taskID string) error {
 		)
 	}
 
+	// TaskContext 정리 (Runner와 생명주기 일치)
+	c.cleanupTaskContext(taskID)
+
 	c.logger.Info("Task deleted successfully",
 		zap.String("task_id", taskID),
 	)

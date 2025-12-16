@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	taskrunner "github.com/cnap-oss/app/internal/runner"
 	"github.com/cnap-oss/app/internal/storage"
@@ -40,14 +39,31 @@ func (c *Controller) ExecuteTask(ctx context.Context, taskID string) error {
 		return fmt.Errorf("runner not found for task: %s", taskID)
 	}
 
-	// context with timeout
-	taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	c.mu.Lock()
-	c.taskContexts[taskID] = &TaskContext{ctx: taskCtx, cancel: cancel}
-	c.mu.Unlock()
+	// TaskContext 조회 또는 생성 (Runner와 생명주기 일치)
+	c.mu.RLock()
+	taskCtx, exists := c.taskContexts[taskID]
+	c.mu.RUnlock()
+
+	if !exists {
+		// TaskContext가 없으면 새로 생성 (타임아웃 없이)
+		newCtx, cancel := context.WithCancel(context.Background())
+		taskCtx = &TaskContext{ctx: newCtx, cancel: cancel}
+
+		c.mu.Lock()
+		c.taskContexts[taskID] = taskCtx
+		c.mu.Unlock()
+
+		c.logger.Info("Created new TaskContext",
+			zap.String("task_id", taskID),
+		)
+	} else {
+		c.logger.Info("Reusing existing TaskContext",
+			zap.String("task_id", taskID),
+		)
+	}
 
 	// 비동기 실행
-	go c.executeTask(taskCtx, taskID, task)
+	go c.executeTask(taskCtx.ctx, taskID, task)
 
 	c.logger.Info("Task execution started",
 		zap.String("task_id", taskID),
@@ -99,17 +115,24 @@ func (c *Controller) CancelTask(ctx context.Context, taskID string) error {
 	return nil
 }
 
+// cleanupTaskContext는 TaskContext를 정리합니다 (Runner 삭제 시 호출).
+func (c *Controller) cleanupTaskContext(taskID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if taskCtx, ok := c.taskContexts[taskID]; ok {
+		taskCtx.cancel()
+		delete(c.taskContexts, taskID)
+		c.logger.Info("TaskContext cleaned up",
+			zap.String("task_id", taskID),
+		)
+	}
+}
+
 // executeTask는 Task를 비동기로 실행합니다.
 func (c *Controller) executeTask(ctx context.Context, taskID string, task *storage.Task) {
 	defer func() {
-		// TaskContext 정리
-		c.mu.Lock()
-		if taskCtx, ok := c.taskContexts[taskID]; ok {
-			taskCtx.cancel()
-			delete(c.taskContexts, taskID)
-		}
-		c.mu.Unlock()
-
+		// panic 복구만 처리 (TaskContext는 Runner 삭제 시에만 정리)
 		if r := recover(); r != nil {
 			c.logger.Error("Task execution panicked",
 				zap.String("task_id", taskID),
@@ -241,6 +264,9 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 				zap.Error(err),
 			)
 		}
+
+		// TaskContext 정리 (Runner와 생명주기 일치)
+		c.cleanupTaskContext(taskID)
 		return
 	}
 
