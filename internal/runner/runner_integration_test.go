@@ -33,7 +33,7 @@ type mockCallback struct {
 	completeResult   *RunResult
 	error            error
 	onStartedCalled  int
-	onMessageCalled  int
+	onEventCalled    int
 	onCompleteCalled int
 	onErrorCalled    int
 	t                *testing.T // 테스트 로깅용
@@ -52,13 +52,24 @@ func (m *mockCallback) OnStarted(taskID string, sessionID string) error {
 	return nil
 }
 
-func (m *mockCallback) OnMessage(taskID string, msg *RunnerMessage) error {
+func (m *mockCallback) OnEvent(taskID string, event *Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.messages = append(m.messages, msg.Content)
-	m.onMessageCalled++
-	m.t.Logf("[Callback] OnMessage #%d: taskID=%s, messageType=%s, content_length=%d",
-		m.onMessageCalled, taskID, msg.Type, len(msg.Content))
+
+	// text 파트에서 텍스트 추출
+	if event.Type == "message.part.updated" {
+		if props, ok := event.Properties["part"].(map[string]interface{}); ok {
+			if partType, _ := props["type"].(string); partType == "text" {
+				if text, ok := props["text"].(string); ok {
+					m.messages = append(m.messages, text)
+				}
+			}
+		}
+	}
+
+	m.onEventCalled++
+	m.t.Logf("[Callback] OnEvent #%d: taskID=%s, eventType=%s",
+		m.onEventCalled, taskID, event.Type)
 	return nil
 }
 
@@ -236,13 +247,13 @@ func TestRunner_RealAPI_WithCallback(t *testing.T) {
 	// 콜백 검증
 	messages := callback.GetMessages()
 	t.Logf("\n========== Callback Statistics ==========")
-	t.Logf("OnMessage called: %d times", callback.onMessageCalled)
+	t.Logf("OnEvent called: %d times", callback.onEventCalled)
 	t.Logf("OnComplete called: %d times", callback.onCompleteCalled)
 	t.Logf("OnError called: %d times", callback.onErrorCalled)
 	t.Logf("Messages received count: %d", len(messages))
 
-	// 메시지가 수신되었는지 확인 (빈 응답 문제 해결 검증)
-	require.Greater(t, callback.onMessageCalled, 0, "OnMessage should be called at least once")
+	// 이벤트가 수신되었는지 확인 (빈 응답 문제 해결 검증)
+	require.Greater(t, callback.onEventCalled, 0, "OnEvent should be called at least once")
 
 	// 완료 콜백 확인
 	require.Equal(t, 1, callback.onCompleteCalled, "OnComplete should be called exactly once")
@@ -334,7 +345,7 @@ func TestRunner_RealAPI_EmptyResponseHandling(t *testing.T) {
 		}
 	}
 
-	t.Logf("Total OnMessage calls: %d", callback.onMessageCalled)
+	t.Logf("Total OnEvent calls: %d", callback.onEventCalled)
 	t.Logf("Total OnComplete calls: %d", callback.onCompleteCalled)
 	t.Logf("Total OnError calls: %d", callback.onErrorCalled)
 }

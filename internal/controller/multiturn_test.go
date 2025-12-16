@@ -200,8 +200,8 @@ func TestContinueEvent(t *testing.T) {
 	require.NoError(t, sqlDB.Close())
 }
 
-// TestOnMessageCallback은 OnMessage 콜백이 ControllerEvent를 전송하는지 테스트합니다.
-func TestOnMessageCallback(t *testing.T) {
+// TestOnEventCallback은 OnEvent 콜백이 ControllerEvent를 전송하는지 테스트합니다.
+func TestOnEventCallback(t *testing.T) {
 	t.Setenv("OPEN_CODE_API_KEY", "test-key")
 
 	// Setup
@@ -224,24 +224,30 @@ func TestOnMessageCallback(t *testing.T) {
 	require.NoError(t, ctrl.CreateAgent(ctx, "test-agent", "Test agent", "opencode", "gpt-4", "System prompt"))
 	require.NoError(t, ctrl.CreateTask(ctx, "test-agent", taskID, "Test prompt"))
 
-	// OnMessage 콜백 호출 (Runner가 중간 응답 생성 시 호출하는 것을 시뮬레이션)
+	// OnEvent 콜백 호출 (Runner가 중간 응답 생성 시 호출하는 것을 시뮬레이션)
 	testMessage := "This is a test message from AI"
-	msg := &taskrunner.RunnerMessage{
-		Type:      taskrunner.MessageTypeText,
-		Timestamp: time.Now(),
-		Content:   testMessage,
+	event := &taskrunner.Event{
+		Type: "message.part.updated",
+		Properties: map[string]interface{}{
+			"messageID": "test-msg-id",
+			"part": map[string]interface{}{
+				"type": "text",
+				"id":   "test-part-id",
+				"text": testMessage,
+			},
+		},
 	}
-	err = ctrl.OnMessage(taskID, msg)
+	err = ctrl.OnEvent(taskID, event)
 	require.NoError(t, err)
 
 	// ControllerEvent 채널에서 이벤트 수신
 	select {
-	case event := <-controllerEventChan:
-		require.Equal(t, taskID, event.TaskID)
-		require.Equal(t, "message", event.Status)
-		require.Equal(t, testMessage, event.Content)
+	case evt := <-controllerEventChan:
+		require.Equal(t, taskID, evt.TaskID)
+		require.Equal(t, "message", evt.Status)
+		require.Equal(t, testMessage, evt.Content)
 	case <-time.After(1 * time.Second):
-		t.Fatal("Timeout waiting for ControllerEvent from OnMessage callback")
+		t.Fatal("Timeout waiting for ControllerEvent from OnEvent callback")
 	}
 
 	// Cleanup

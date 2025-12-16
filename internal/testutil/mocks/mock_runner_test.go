@@ -27,7 +27,7 @@ func (m *MockCallback) OnStarted(taskID string, sessionID string) error {
 	return nil
 }
 
-func (m *MockCallback) OnMessage(taskID string, msg *taskrunner.RunnerMessage) error {
+func (m *MockCallback) OnEvent(taskID string, event *taskrunner.Event) error {
 	return nil
 }
 

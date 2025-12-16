@@ -22,92 +22,128 @@ func (c *Controller) OnStarted(taskID string, sessionID string) error {
 	return nil
 }
 
-// OnMessage는 Runner가 중간 응답을 생성할 때 호출됩니다.
+// OnEvent는 Runner가 SSE 이벤트를 수신할 때 호출됩니다.
 // 이를 통해 Connector에 실시간으로 메시지를 전달합니다.
-func (c *Controller) OnMessage(taskID string, msg *taskrunner.RunnerMessage) error {
-	c.logger.Info("OnMessage callback",
+func (c *Controller) OnEvent(taskID string, evt *taskrunner.Event) error {
+	c.logger.Info("OnEvent callback",
 		zap.String("task_id", taskID),
-		zap.String("message_type", string(msg.Type)),
-		zap.Int("content_length", len(msg.Content)),
+		zap.String("event_type", evt.Type),
+		zap.Any("properties", evt.Properties),
 	)
 
 	event := ControllerEvent{
-		TaskID:    taskID,
-		MessageID: msg.MessageID,
-		PartID:    msg.PartID,
-		IsPartial: msg.IsPartial,
+		TaskID: taskID,
 	}
 
-	switch msg.Type {
-	case taskrunner.MessageTypeText:
-		if msg.IsPartial {
-			event.EventType = EventTypeStreamDelta
-			event.Delta = msg.Delta
-		} else {
-			event.EventType = EventTypePartComplete
-			event.Content = msg.Content
-		}
-		event.PartType = PartTypeText
-		event.Status = "message" // 하위 호환성
+	switch evt.Type {
+	case "message.part.updated":
+		// 파트 정보 추출
+		if props, ok := evt.Properties["part"].(map[string]interface{}); ok {
+			partType, _ := props["type"].(string)
+			partID, _ := props["id"].(string)
+			messageID, _ := evt.Properties["messageID"].(string)
 
-	case taskrunner.MessageTypeReasoning:
-		if msg.IsPartial {
-			event.EventType = EventTypeStreamDelta
-			event.Delta = msg.Delta
-		} else {
-			event.EventType = EventTypePartComplete
-			event.Content = msg.Content
-		}
-		event.PartType = PartTypeReasoning
-		event.Status = "reasoning"
+			event.PartID = partID
+			event.MessageID = messageID
 
-	case taskrunner.MessageTypeToolCall:
-		event.EventType = EventTypeToolStart
-		event.PartType = PartTypeTool
-		event.Status = "tool_start"
-		if msg.ToolCall != nil {
-			event.ToolInfo = &ToolEventInfo{
-				ToolName: msg.ToolCall.ToolName,
-				CallID:   msg.ToolCall.ToolID,
-				Input:    msg.ToolCall.Arguments,
+			switch partType {
+			case "text":
+				// delta 필드가 있으면 부분 업데이트
+				if delta, hasDelta := evt.Properties["delta"].(string); hasDelta {
+					event.EventType = EventTypeStreamDelta
+					event.Delta = delta
+					event.IsPartial = true
+				} else {
+					event.EventType = EventTypePartComplete
+					if text, ok := props["text"].(string); ok {
+						event.Content = text
+					}
+					event.IsPartial = false
+				}
+				event.PartType = PartTypeText
+				event.Status = "message" // 하위 호환성
+
+			case "reasoning":
+				// delta 필드가 있으면 부분 업데이트
+				if delta, hasDelta := evt.Properties["delta"].(string); hasDelta {
+					event.EventType = EventTypeStreamDelta
+					event.Delta = delta
+					event.IsPartial = true
+				} else {
+					event.EventType = EventTypePartComplete
+					if text, ok := props["text"].(string); ok {
+						event.Content = text
+					}
+					event.IsPartial = false
+				}
+				event.PartType = PartTypeReasoning
+				event.Status = "reasoning"
+
+			case "tool":
+				// 도구 상태 확인
+				if state, ok := props["state"].(map[string]interface{}); ok {
+					status, _ := state["status"].(string)
+					callID, _ := props["callID"].(string)
+					tool, _ := props["tool"].(string)
+
+					if status == "running" || status == "pending" {
+						event.EventType = EventTypeToolStart
+						event.PartType = PartTypeTool
+						event.Status = "tool_start"
+						event.ToolInfo = &ToolEventInfo{
+							CallID:   callID,
+							ToolName: tool,
+						}
+						if input, ok := state["input"].(map[string]interface{}); ok {
+							event.ToolInfo.Input = input
+						}
+					} else {
+						event.PartType = PartTypeTool
+						isError := status == "error"
+						if isError {
+							event.EventType = EventTypeToolError
+							event.Status = "tool_error"
+						} else {
+							event.EventType = EventTypeToolComplete
+							event.Status = "tool_complete"
+						}
+						event.ToolInfo = &ToolEventInfo{
+							CallID:   callID,
+							ToolName: tool,
+						}
+						if output, ok := state["output"].(string); ok {
+							if isError {
+								event.ToolInfo.Error = output
+							} else {
+								event.ToolInfo.Output = output
+							}
+						}
+					}
+				}
+			default:
+				// 지원하지 않는 파트 타입은 무시
+				return nil
 			}
 		}
 
-	case taskrunner.MessageTypeToolResult:
-		event.EventType = EventTypeToolComplete
-		event.PartType = PartTypeTool
-		event.Status = "tool_complete"
-		if msg.ToolResult != nil {
-			event.ToolInfo = &ToolEventInfo{
-				ToolName: msg.ToolResult.ToolName,
-				CallID:   msg.ToolResult.ToolID,
-				Output:   msg.ToolResult.Result,
-			}
-			if msg.ToolResult.IsError {
-				event.EventType = EventTypeToolError
-				event.ToolInfo.Error = msg.ToolResult.Result
-				event.Status = "tool_error"
-			}
-		}
-
-	case taskrunner.MessageTypeComplete:
+	case "message.completed":
 		event.EventType = EventTypeMessageComplete
-		event.Content = msg.Content
 		event.Status = "message_complete"
+		if messageID, ok := evt.Properties["messageID"].(string); ok {
+			event.MessageID = messageID
+		}
 
-	case taskrunner.MessageTypeError:
+	case "session.aborted":
 		event.EventType = EventTypeError
 		event.Status = "error"
-		if msg.Error != nil {
-			event.Error = fmt.Errorf("%s: %s", msg.Error.Code, msg.Error.Message)
-			event.Content = msg.Error.Message
-		}
+		event.Error = fmt.Errorf("session aborted")
 
 	default:
-		// 알 수 없는 타입은 legacy 방식으로 처리
-		event.EventType = EventTypeLegacy
-		event.Status = "message"
-		event.Content = msg.Content
+		// 알 수 없는 이벤트 타입은 무시
+		c.logger.Debug("Unknown event type, skipping",
+			zap.String("event_type", evt.Type),
+		)
+		return nil
 	}
 
 	// 이벤트 전송 (빈 이벤트는 무시)
@@ -115,7 +151,7 @@ func (c *Controller) OnMessage(taskID string, msg *taskrunner.RunnerMessage) err
 		c.controllerEventChan <- event
 	}
 
-	return nil // UpdateTaskStatus는 상위에서 처리
+	return nil
 }
 
 // OnComplete는 Task가 완료될 때 호출됩니다.
