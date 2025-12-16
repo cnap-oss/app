@@ -38,6 +38,11 @@ func NewController(logger *zap.Logger, repo *storage.Repository, eventChan chan 
 func (c *Controller) Start(ctx context.Context) error {
 	c.logger.Info("Starting controller server")
 
+	// RunnerManager 시작
+	if err := c.runnerManager.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start runner manager: %w", err)
+	}
+
 	// 이벤트 루프 시작 (별도 goroutine)
 	go c.eventLoop(ctx)
 
@@ -60,12 +65,12 @@ func (c *Controller) Start(ctx context.Context) error {
 func (c *Controller) Stop(ctx context.Context) error {
 	c.logger.Info("Stopping controller server")
 
-	// 정리 작업 수행
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("shutdown timeout exceeded")
-	case <-time.After(100 * time.Millisecond):
-		c.logger.Info("Controller server stopped")
-		return nil
+	// RunnerManager 종료 (모든 컨테이너 정리)
+	if err := c.runnerManager.Stop(ctx); err != nil {
+		c.logger.Error("Failed to stop runner manager", zap.Error(err))
+		return fmt.Errorf("failed to stop runner manager: %w", err)
 	}
+
+	c.logger.Info("Controller server stopped")
+	return nil
 }

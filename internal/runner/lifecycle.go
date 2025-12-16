@@ -93,6 +93,9 @@ type lifecycleManager struct {
 	// 정리 루프 제어
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+	stopped  bool
+	running  bool
+	stopMu   sync.Mutex
 }
 
 // NewLifecycleManager는 새 LifecycleManager를 생성합니다.
@@ -116,6 +119,23 @@ func NewLifecycleManager(logger *zap.Logger, config ...LifecycleConfig) Lifecycl
 
 // Start implements LifecycleManager.
 func (lm *lifecycleManager) Start(ctx context.Context) error {
+	lm.stopMu.Lock()
+	defer lm.stopMu.Unlock()
+
+	// 이미 실행 중이면 무시
+	if lm.running {
+		lm.logger.Debug("수명 관리자가 이미 실행 중")
+		return nil
+	}
+
+	// 이미 중지되었다면 재시작 준비
+	if lm.stopped {
+		lm.stopChan = make(chan struct{})
+		lm.stopped = false
+	}
+
+	lm.running = true
+
 	lm.logger.Info("수명 관리자 시작",
 		zap.Duration("idle_timeout", lm.config.IdleTimeout),
 		zap.Duration("max_runtime", lm.config.MaxRuntime),
@@ -131,6 +151,16 @@ func (lm *lifecycleManager) Start(ctx context.Context) error {
 
 // Stop implements LifecycleManager.
 func (lm *lifecycleManager) Stop(ctx context.Context) error {
+	lm.stopMu.Lock()
+	if lm.stopped {
+		lm.stopMu.Unlock()
+		lm.logger.Debug("수명 관리자가 이미 중지됨")
+		return nil
+	}
+	lm.stopped = true
+	lm.running = false
+	lm.stopMu.Unlock()
+
 	lm.logger.Info("수명 관리자 중지 시작")
 
 	// 정리 루프 중지
