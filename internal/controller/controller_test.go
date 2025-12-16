@@ -31,6 +31,12 @@ func newTestController(t *testing.T) (*controller.Controller, func()) {
 	ctrl := controller.NewController(zaptest.NewLogger(t), repo, connectorEventChan, controllerEventChan)
 
 	cleanup := func() {
+		// Controller 종료 (RunnerManager의 모든 컨테이너 정리)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = ctrl.Stop(cleanupCtx)
+
+		// DB 종료
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
