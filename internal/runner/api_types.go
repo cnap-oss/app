@@ -60,6 +60,8 @@ type RunnerMessage struct {
 	PartID     string            `json:"part_id,omitempty"`
 	Timestamp  time.Time         `json:"timestamp"`
 	Content    string            `json:"content,omitempty"`
+	Delta      string            `json:"delta,omitempty"`      // 부분 업데이트 텍스트 (새로 추가된 부분만)
+	IsPartial  bool              `json:"is_partial,omitempty"` // delta 기반 부분 업데이트 여부
 	ToolCall   *ToolCallInfo     `json:"tool_call,omitempty"`
 	ToolResult *ToolResultInfo   `json:"tool_result,omitempty"`
 	Status     string            `json:"status,omitempty"`
