@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/cnap-oss/app/internal/controller"
@@ -92,7 +93,31 @@ func (s *Server) handleToolStart(event controller.ControllerEvent) {
 			zap.String("tool_name", event.ToolInfo.ToolName),
 			zap.String("call_id", event.ToolInfo.CallID),
 		)
-		// TODO: Discord 메시지에 도구 시작 상태 표시
+
+		// 도구 실행 시작 메시지 생성
+		content := formatToolMessage(event.ToolInfo.ToolName, "running", "", event.ToolInfo.Input)
+
+		// Discord 메시지 전송
+		msg, err := s.session.ChannelMessageSend(event.TaskID, content)
+		if err != nil {
+			s.logger.Error("Failed to send tool start message",
+				zap.String("task_id", event.TaskID),
+				zap.String("tool_name", event.ToolInfo.ToolName),
+				zap.Error(err),
+			)
+			return
+		}
+
+		// 메시지 ID 저장 (나중에 업데이트하기 위해)
+		messageKey := event.TaskID + ":" + event.ToolInfo.CallID
+		s.toolMessagesMutex.Lock()
+		s.toolMessages[messageKey] = msg.ID
+		s.toolMessagesMutex.Unlock()
+
+		s.logger.Debug("Tool start message sent",
+			zap.String("task_id", event.TaskID),
+			zap.String("message_id", msg.ID),
+		)
 	}
 }
 
@@ -104,7 +129,32 @@ func (s *Server) handleToolProgress(event controller.ControllerEvent) {
 			zap.String("tool_name", event.ToolInfo.ToolName),
 			zap.String("call_id", event.ToolInfo.CallID),
 		)
-		// TODO: Discord 메시지에 도구 진행 상태 업데이트
+
+		// 저장된 메시지 ID 가져오기
+		messageKey := event.TaskID + ":" + event.ToolInfo.CallID
+		s.toolMessagesMutex.RLock()
+		messageID, exists := s.toolMessages[messageKey]
+		s.toolMessagesMutex.RUnlock()
+
+		if !exists {
+			s.logger.Warn("Tool message not found for progress update",
+				zap.String("task_id", event.TaskID),
+				zap.String("call_id", event.ToolInfo.CallID),
+			)
+			return
+		}
+
+		// Progress 상태로 메시지 업데이트
+		content := formatToolMessage(event.ToolInfo.ToolName, "running", "", event.ToolInfo.Input)
+
+		_, err := s.session.ChannelMessageEdit(event.TaskID, messageID, content)
+		if err != nil {
+			s.logger.Error("Failed to update tool progress message",
+				zap.String("task_id", event.TaskID),
+				zap.String("tool_name", event.ToolInfo.ToolName),
+				zap.Error(err),
+			)
+		}
 	}
 }
 
@@ -117,7 +167,37 @@ func (s *Server) handleToolComplete(event controller.ControllerEvent) {
 			zap.String("call_id", event.ToolInfo.CallID),
 			zap.String("output", truncate(event.ToolInfo.Output, 100)),
 		)
-		// TODO: Discord 메시지에 도구 완료 상태 표시
+
+		// 저장된 메시지 ID 가져오기
+		messageKey := event.TaskID + ":" + event.ToolInfo.CallID
+		s.toolMessagesMutex.RLock()
+		messageID, exists := s.toolMessages[messageKey]
+		s.toolMessagesMutex.RUnlock()
+
+		if !exists {
+			s.logger.Warn("Tool message not found for complete update",
+				zap.String("task_id", event.TaskID),
+				zap.String("call_id", event.ToolInfo.CallID),
+			)
+			return
+		}
+
+		// Complete 상태로 메시지 업데이트
+		content := formatToolMessage(event.ToolInfo.ToolName, "completed", event.ToolInfo.Output, event.ToolInfo.Input)
+
+		_, err := s.session.ChannelMessageEdit(event.TaskID, messageID, content)
+		if err != nil {
+			s.logger.Error("Failed to update tool complete message",
+				zap.String("task_id", event.TaskID),
+				zap.String("tool_name", event.ToolInfo.ToolName),
+				zap.Error(err),
+			)
+		}
+
+		// 메시지 ID 정리
+		s.toolMessagesMutex.Lock()
+		delete(s.toolMessages, messageKey)
+		s.toolMessagesMutex.Unlock()
 	}
 }
 
@@ -130,7 +210,37 @@ func (s *Server) handleToolError(event controller.ControllerEvent) {
 			zap.String("call_id", event.ToolInfo.CallID),
 			zap.String("error", event.ToolInfo.Error),
 		)
-		// TODO: Discord 메시지에 도구 에러 표시
+
+		// 저장된 메시지 ID 가져오기
+		messageKey := event.TaskID + ":" + event.ToolInfo.CallID
+		s.toolMessagesMutex.RLock()
+		messageID, exists := s.toolMessages[messageKey]
+		s.toolMessagesMutex.RUnlock()
+
+		if !exists {
+			s.logger.Warn("Tool message not found for error update",
+				zap.String("task_id", event.TaskID),
+				zap.String("call_id", event.ToolInfo.CallID),
+			)
+			return
+		}
+
+		// Error 상태로 메시지 업데이트
+		content := formatToolMessage(event.ToolInfo.ToolName, "error", event.ToolInfo.Error, event.ToolInfo.Input)
+
+		_, err := s.session.ChannelMessageEdit(event.TaskID, messageID, content)
+		if err != nil {
+			s.logger.Error("Failed to update tool error message",
+				zap.String("task_id", event.TaskID),
+				zap.String("tool_name", event.ToolInfo.ToolName),
+				zap.Error(err),
+			)
+		}
+
+		// 메시지 ID 정리
+		s.toolMessagesMutex.Lock()
+		delete(s.toolMessages, messageKey)
+		s.toolMessagesMutex.Unlock()
 	}
 }
 
@@ -339,4 +449,58 @@ func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 			zap.String("task_id", result.TaskID),
 		)
 	}
+}
+
+// formatToolMessage는 도구 상태에 따라 Discord 메시지를 포맷합니다.
+func formatToolMessage(toolName, status, output string, input map[string]any) string {
+	var emoji string
+	var statusText string
+
+	switch status {
+	case "running":
+		emoji = "🔧"
+		statusText = "실행 중"
+	case "completed":
+		emoji = "✅"
+		statusText = "완료"
+	case "error":
+		emoji = "❌"
+		statusText = "에러"
+	default:
+		emoji = "🔧"
+		statusText = status
+	}
+
+	message := fmt.Sprintf("%s **도구 %s**: `%s`", emoji, statusText, toolName)
+
+	// Input 정보 추가 (간단히)
+	if len(input) > 0 {
+		message += "\n```"
+		count := 0
+		for key, value := range input {
+			if count > 2 { // 최대 3개만 표시
+				message += "\n..."
+				break
+			}
+			valueStr := fmt.Sprintf("%v", value)
+			if len(valueStr) > 50 {
+				valueStr = valueStr[:50] + "..."
+			}
+			message += fmt.Sprintf("\n%s: %s", key, valueStr)
+			count++
+		}
+		message += "\n```"
+	}
+
+	// Output/Error 정보 추가
+	if output != "" {
+		const maxOutputLen = 300
+		if len(output) > maxOutputLen {
+			message += fmt.Sprintf("\n```\n%s...\n```", output[:maxOutputLen])
+		} else {
+			message += fmt.Sprintf("\n```\n%s\n```", output)
+		}
+	}
+
+	return message
 }

@@ -21,6 +21,8 @@ type Server struct {
 	activeThreads       map[string]string
 	connectorEventChan  chan controller.ConnectorEvent
 	controllerEventChan <-chan controller.ControllerEvent
+	toolMessagesMutex   sync.RWMutex
+	toolMessages        map[string]string // key: taskID:callID, value: Discord messageID
 }
 
 // NewServer는 새로운 connector 서버를 생성하고 초기화합니다.
@@ -31,6 +33,7 @@ func NewServer(logger *zap.Logger, ctrl *controller.Controller, eventChan chan c
 		activeThreads:       make(map[string]string),
 		connectorEventChan:  eventChan,
 		controllerEventChan: resultChan,
+		toolMessages:        make(map[string]string),
 	}
 }
 
