@@ -41,7 +41,7 @@ func (c *Controller) OnEvent(taskID string, evt *taskrunner.Event) error {
 		if props, ok := evt.Properties["part"].(map[string]interface{}); ok {
 			partType, _ := props["type"].(string)
 			partID, _ := props["id"].(string)
-			messageID, _ := evt.Properties["messageID"].(string)
+			messageID, _ := props["messageID"].(string)
 
 			event.PartID = partID
 			event.MessageID = messageID
@@ -59,6 +59,15 @@ func (c *Controller) OnEvent(taskID string, evt *taskrunner.Event) error {
 						event.Content = text
 					}
 					event.IsPartial = false
+
+					// PartComplete 시 메시지 role 정보 가져오기
+					if messageID != "" {
+						c.logger.Info("Fetching message role",
+							zap.String("task_id", taskID),
+							zap.String("message_id", messageID),
+						)
+						c.fetchMessageRole(taskID, messageID, &event)
+					}
 				}
 				event.PartType = PartTypeText
 				event.Status = "message" // 하위 호환성
@@ -75,6 +84,10 @@ func (c *Controller) OnEvent(taskID string, evt *taskrunner.Event) error {
 						event.Content = text
 					}
 					event.IsPartial = false
+					// PartComplete 시 메시지 role 정보 가져오기
+					if messageID != "" {
+						c.fetchMessageRole(taskID, messageID, &event)
+					}
 				}
 				event.PartType = PartTypeReasoning
 				event.Status = "reasoning"
@@ -233,6 +246,47 @@ func (c *Controller) OnError(taskID string, err error) error {
 
 	// 상태를 failed로 변경
 	return c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusFailed)
+}
+
+// fetchMessageRole은 메시지 ID로부터 role 정보를 가져와 이벤트에 설정합니다.
+func (c *Controller) fetchMessageRole(taskID string, messageID string, event *ControllerEvent) {
+	// RunnerManager에서 Runner 가져오기
+	runner := c.runnerManager.GetRunner(taskID)
+	if runner == nil {
+		c.logger.Warn("Runner를 찾을 수 없음",
+			zap.String("task_id", taskID),
+			zap.String("message_id", messageID),
+		)
+		return
+	}
+
+	// 메시지 정보 조회
+	ctx := context.Background()
+	msgInfo, err := runner.GetMessage(ctx, messageID)
+	if err != nil {
+		c.logger.Warn("메시지 정보 조회 실패",
+			zap.String("task_id", taskID),
+			zap.String("message_id", messageID),
+			zap.Error(err),
+		)
+		return
+	}
+
+	// role 설정
+	if msgInfo != nil && msgInfo.Info != nil {
+		switch msg := msgInfo.Info.(type) {
+		case taskrunner.UserMessage:
+			event.Role = msg.Role
+		case taskrunner.AssistantMessage:
+			event.Role = msg.Role
+		default:
+			c.logger.Info("알 수 없는 메시지 타입",
+				zap.String("task_id", taskID),
+				zap.String("message_id", messageID),
+				zap.Any("message", msg),
+			)
+		}
+	}
 }
 
 // ensure Controller implements StatusCallback

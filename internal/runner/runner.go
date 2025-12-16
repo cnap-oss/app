@@ -694,6 +694,18 @@ func (r *Runner) buildMessages(req *RunRequest) []ChatMessage {
 	return messages
 }
 
+// GetMessage는 특정 메시지의 정보를 조회합니다.
+func (r *Runner) GetMessage(ctx context.Context, messageID string) (*struct {
+	Info  Message `json:"info"`
+	Parts []Part  `json:"parts"`
+}, error) {
+	if r.apiClient == nil || r.sessionID == "" {
+		return nil, fmt.Errorf("runner가 초기화되지 않음")
+	}
+
+	return r.apiClient.GetMessage(ctx, r.sessionID, messageID)
+}
+
 // parseModel은 "provider/model" 형식의 모델 문자열을 파싱합니다.
 func parseModel(model string) (providerID, modelID string) {
 	parts := strings.SplitN(model, "/", 2)

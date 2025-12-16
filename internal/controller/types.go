@@ -98,6 +98,7 @@ type ControllerEvent struct {
 	PartType  PartType            `json:"part_type,omitempty"`   // text, tool, reasoning 등
 	Delta     string              `json:"delta,omitempty"`       // 부분 업데이트 텍스트
 	IsPartial bool                `json:"is_partial,omitempty"`  // 부분 업데이트 여부
+	Role      string              `json:"role,omitempty"`        // 메시지 role (user, assistant)
 	ToolInfo  *ToolEventInfo      `json:"tool_info,omitempty"`   // 도구 관련 정보
 }
 
