@@ -32,10 +32,10 @@ func (s *Server) messageCreateHandler(_ *discordgo.Session, m *discordgo.Message
 		s.callAgentInThread(m.Message, agent)
 	} else {
 		task, err := s.controller.GetTask(context.Background(), m.ChannelID)
-		s.threadsMutex.Lock()
-		s.activeThreads[m.ChannelID] = task.AgentID
-		s.threadsMutex.Unlock()
 		if err == nil && task.AgentID != "" {
+			s.threadsMutex.Lock()
+			s.activeThreads[m.ChannelID] = task.AgentID
+			s.threadsMutex.Unlock()
 			ctx := context.Background()
 			agent, err := s.controller.GetAgentInfo(ctx, task.AgentID)
 			if err != nil {
