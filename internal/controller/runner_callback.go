@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	taskrunner "github.com/cnap-oss/app/internal/runner"
 	"github.com/cnap-oss/app/internal/storage"
@@ -30,16 +31,91 @@ func (c *Controller) OnMessage(taskID string, msg *taskrunner.RunnerMessage) err
 		zap.Int("content_length", len(msg.Content)),
 	)
 
-	// 텍스트 메시지인 경우에만 ControllerEvent로 전달
-	if msg.IsText() && msg.Content != "" {
-		c.controllerEventChan <- ControllerEvent{
-			TaskID:  taskID,
-			Status:  "message",
-			Content: msg.Content,
-		}
+	event := ControllerEvent{
+		TaskID:    taskID,
+		MessageID: msg.MessageID,
+		PartID:    msg.PartID,
+		IsPartial: msg.IsPartial,
 	}
 
-	return c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusWaiting)
+	switch msg.Type {
+	case taskrunner.MessageTypeText:
+		if msg.IsPartial {
+			event.EventType = EventTypeStreamDelta
+			event.Delta = msg.Delta
+		} else {
+			event.EventType = EventTypePartComplete
+			event.Content = msg.Content
+		}
+		event.PartType = PartTypeText
+		event.Status = "message" // 하위 호환성
+
+	case taskrunner.MessageTypeReasoning:
+		if msg.IsPartial {
+			event.EventType = EventTypeStreamDelta
+			event.Delta = msg.Delta
+		} else {
+			event.EventType = EventTypePartComplete
+			event.Content = msg.Content
+		}
+		event.PartType = PartTypeReasoning
+		event.Status = "reasoning"
+
+	case taskrunner.MessageTypeToolCall:
+		event.EventType = EventTypeToolStart
+		event.PartType = PartTypeTool
+		event.Status = "tool_start"
+		if msg.ToolCall != nil {
+			event.ToolInfo = &ToolEventInfo{
+				ToolName: msg.ToolCall.ToolName,
+				CallID:   msg.ToolCall.ToolID,
+				Input:    msg.ToolCall.Arguments,
+			}
+		}
+
+	case taskrunner.MessageTypeToolResult:
+		event.EventType = EventTypeToolComplete
+		event.PartType = PartTypeTool
+		event.Status = "tool_complete"
+		if msg.ToolResult != nil {
+			event.ToolInfo = &ToolEventInfo{
+				ToolName: msg.ToolResult.ToolName,
+				CallID:   msg.ToolResult.ToolID,
+				Output:   msg.ToolResult.Result,
+			}
+			if msg.ToolResult.IsError {
+				event.EventType = EventTypeToolError
+				event.ToolInfo.Error = msg.ToolResult.Result
+				event.Status = "tool_error"
+			}
+		}
+
+	case taskrunner.MessageTypeComplete:
+		event.EventType = EventTypeMessageComplete
+		event.Content = msg.Content
+		event.Status = "message_complete"
+
+	case taskrunner.MessageTypeError:
+		event.EventType = EventTypeError
+		event.Status = "error"
+		if msg.Error != nil {
+			event.Error = fmt.Errorf("%s: %s", msg.Error.Code, msg.Error.Message)
+			event.Content = msg.Error.Message
+		}
+
+	default:
+		// 알 수 없는 타입은 legacy 방식으로 처리
+		event.EventType = EventTypeLegacy
+		event.Status = "message"
+		event.Content = msg.Content
+	}
+
+	// 이벤트 전송 (빈 이벤트는 무시)
+	if event.EventType != "" {
+		c.controllerEventChan <- event
+	}
+
+	return nil // UpdateTaskStatus는 상위에서 처리
 }
 
 // OnComplete는 Task가 완료될 때 호출됩니다.
