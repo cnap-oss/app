@@ -30,6 +30,20 @@ func (s *Server) messageCreateHandler(_ *discordgo.Session, m *discordgo.Message
 			return
 		}
 		s.callAgentInThread(m.Message, agent)
+	} else {
+		task, err := s.controller.GetTask(context.Background(), m.ChannelID)
+		s.threadsMutex.Lock()
+		s.activeThreads[m.ChannelID] = task.AgentID
+		s.threadsMutex.Unlock()
+		if err == nil && task.AgentID != "" {
+			ctx := context.Background()
+			agent, err := s.controller.GetAgentInfo(ctx, task.AgentID)
+			if err != nil {
+				s.logger.Error("Failed to get agent info from controller for existing task", zap.Error(err), zap.String("agent_id", task.AgentID))
+				return
+			}
+			s.callAgentInThread(m.Message, agent)
+		}
 	}
 }
 
