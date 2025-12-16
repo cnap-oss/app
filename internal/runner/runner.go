@@ -677,21 +677,24 @@ func (r *Runner) runInternal(ctx context.Context, req *RunRequest) error {
 }
 
 // buildMessages는 요청 메시지를 구성합니다.
+// 마지막 사용자 메시지만 반환합니다.
 func (r *Runner) buildMessages(req *RunRequest) []ChatMessage {
-	messages := make([]ChatMessage, 0, len(req.Messages)+1)
-
-	// 시스템 프롬프트 추가
-	if req.SystemPrompt != "" {
-		messages = append(messages, ChatMessage{
-			Role:    "system",
-			Content: req.SystemPrompt,
-		})
+	// 마지막 사용자 메시지 찾기
+	var lastUserMessage *ChatMessage
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == "user" {
+			lastUserMessage = &req.Messages[i]
+			break
+		}
 	}
 
-	// 기존 메시지 추가
-	messages = append(messages, req.Messages...)
+	// 마지막 사용자 메시지가 없으면 빈 배열 반환
+	if lastUserMessage == nil {
+		return []ChatMessage{}
+	}
 
-	return messages
+	// 마지막 사용자 메시지만 반환
+	return []ChatMessage{*lastUserMessage}
 }
 
 // GetMessage는 특정 메시지의 정보를 조회합니다.
