@@ -739,10 +739,24 @@ func (r *Runner) convertEventToMessage(event *Event, sessionID string) *RunnerMe
 			switch partType {
 			case "text":
 				msg.Type = MessageTypeText
-				msg.Content, _ = props["text"].(string)
+				// delta 필드가 있으면 부분 업데이트
+				if delta, hasDelta := event.Properties["delta"].(string); hasDelta {
+					msg.Delta = delta
+					msg.IsPartial = true
+				} else {
+					msg.Content, _ = props["text"].(string)
+					msg.IsPartial = false
+				}
 			case "reasoning":
 				msg.Type = MessageTypeReasoning
-				msg.Content, _ = props["text"].(string)
+				// delta 필드가 있으면 부분 업데이트
+				if delta, hasDelta := event.Properties["delta"].(string); hasDelta {
+					msg.Delta = delta
+					msg.IsPartial = true
+				} else {
+					msg.Content, _ = props["text"].(string)
+					msg.IsPartial = false
+				}
 			case "tool":
 				// 도구 상태 확인
 				if state, ok := props["state"].(map[string]interface{}); ok {

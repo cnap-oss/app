@@ -130,6 +130,57 @@ func TestRunnerMessage_Construction(t *testing.T) {
 	}
 }
 
+func TestRunnerMessage_DeltaAndIsPartial(t *testing.T) {
+	tests := []struct {
+		name        string
+		msg         *RunnerMessage
+		wantDelta   string
+		wantPartial bool
+	}{
+		{
+			name: "Full content message",
+			msg: &RunnerMessage{
+				Type:      MessageTypeText,
+				Content:   "Full message content",
+				IsPartial: false,
+			},
+			wantDelta:   "",
+			wantPartial: false,
+		},
+		{
+			name: "Partial delta message",
+			msg: &RunnerMessage{
+				Type:      MessageTypeText,
+				Delta:     "new text chunk",
+				IsPartial: true,
+			},
+			wantDelta:   "new text chunk",
+			wantPartial: true,
+		},
+		{
+			name: "Reasoning with delta",
+			msg: &RunnerMessage{
+				Type:      MessageTypeReasoning,
+				Delta:     "thinking...",
+				IsPartial: true,
+			},
+			wantDelta:   "thinking...",
+			wantPartial: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.msg.Delta != tt.wantDelta {
+				t.Errorf("Delta = %v, want %v", tt.msg.Delta, tt.wantDelta)
+			}
+			if tt.msg.IsPartial != tt.wantPartial {
+				t.Errorf("IsPartial = %v, want %v", tt.msg.IsPartial, tt.wantPartial)
+			}
+		})
+	}
+}
+
 func TestToolCallInfo_Construction(t *testing.T) {
 	toolCall := &ToolCallInfo{
 		ToolID:   "tool_123",
