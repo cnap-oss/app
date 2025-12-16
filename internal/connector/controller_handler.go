@@ -77,6 +77,7 @@ func (s *Server) handlePartComplete(event controller.ControllerEvent) {
 		zap.String("content", truncate(event.Content, 100)),
 	)
 	// TODO: Discord 메시지 업데이트
+	s.sendMessageToDiscord(event)
 }
 
 // handleToolStart는 도구 시작을 처리합니다.
