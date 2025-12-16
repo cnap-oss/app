@@ -133,6 +133,37 @@ func (c *Controller) OnEvent(taskID string, evt *taskrunner.Event) error {
 			event.MessageID = messageID
 		}
 
+	case "session.status":
+		// 세션 상태 변경 이벤트 처리
+		// status는 객체이고 type 필드를 가지고 있음
+		if statusObj, ok := evt.Properties["status"].(map[string]interface{}); ok {
+			if statusType, ok := statusObj["type"].(string); ok {
+				c.logger.Info("Session status changed",
+					zap.String("task_id", taskID),
+					zap.String("status_type", statusType),
+				)
+
+				// status.type이 idle이고 Runner status가 running이면 Task status를 waiting으로 변경
+				if statusType == "idle" {
+					runner := c.runnerManager.GetRunner(taskID)
+					if runner != nil && runner.Status == taskrunner.RunnerStatusRunning {
+						c.logger.Info("Changing task status to waiting",
+							zap.String("task_id", taskID),
+							zap.String("runner_status", runner.Status),
+						)
+						// Task 상태를 waiting으로 업데이트
+						if err := c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusWaiting); err != nil {
+							c.logger.Error("Failed to update task status to waiting",
+								zap.String("task_id", taskID),
+								zap.Error(err),
+							)
+						}
+					}
+				}
+			}
+		}
+		return nil
+
 	case "session.aborted":
 		event.EventType = EventTypeError
 		event.Status = "error"
