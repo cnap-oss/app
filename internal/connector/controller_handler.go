@@ -76,8 +76,10 @@ func (s *Server) handlePartComplete(event controller.ControllerEvent) {
 		zap.String("part_type", string(event.PartType)),
 		zap.String("content", truncate(event.Content, 100)),
 	)
+	if event.PartType == controller.PartTypeText {
+		s.sendMessageToDiscord(event)
+	}
 	// TODO: Discord 메시지 업데이트
-	s.sendMessageToDiscord(event)
 }
 
 // handleToolStart는 도구 시작을 처리합니다.
@@ -138,7 +140,7 @@ func (s *Server) handleMessageComplete(event controller.ControllerEvent) {
 		zap.String("content", truncate(event.Content, 200)),
 	)
 	// 기존 메시지 전송 로직 재사용
-	s.sendMessageToDiscord(event)
+	// s.sendMessageToDiscord(event)
 }
 
 // handleError는 에러 이벤트를 처리합니다.
@@ -160,8 +162,6 @@ func (s *Server) handleLegacyEvent(event controller.ControllerEvent) {
 	)
 
 	switch event.Status {
-	case "message":
-		s.sendMessageToDiscord(event)
 	case "completed", "failed", "canceled":
 		s.sendResultToDiscord(event)
 	default:
