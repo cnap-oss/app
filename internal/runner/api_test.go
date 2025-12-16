@@ -151,7 +151,7 @@ func TestOpenCodeClient_Prompt(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenCodeClient(server.URL)
-	resp, err := client.Prompt(context.Background(), "ses_123", &PromptRequest{
+	resp, err := client.Message(context.Background(), "ses_123", &PromptRequest{
 		Model: &PromptModel{
 			ProviderID: "anthropic",
 			ModelID:    "claude-3-5-sonnet-20241022",

@@ -155,8 +155,8 @@ func (c *OpenCodeClient) ListSessions(ctx context.Context) ([]Session, error) {
 // Message API
 // ======================================
 
-// Prompt는 메시지를 전송하고 응답을 수신합니다.
-func (c *OpenCodeClient) Prompt(ctx context.Context, sessionID string, req *PromptRequest) (*PromptResponse, error) {
+// Message는 메시지를 전송하고 응답을 수신합니다.
+func (c *OpenCodeClient) Message(ctx context.Context, sessionID string, req *PromptRequest) (*PromptResponse, error) {
 	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/session/%s/message", sessionID), req)
 	if err != nil {
 		return nil, err
