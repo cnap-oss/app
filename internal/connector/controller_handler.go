@@ -43,6 +43,7 @@ func (s *Server) handleControllerEvent(event controller.ControllerEvent) {
 		s.handleToolError(event)
 	case controller.EventTypeMessageComplete:
 		s.handleMessageComplete(event)
+
 	case controller.EventTypeError:
 		s.handleError(event)
 	case controller.EventTypeLegacy, "":
@@ -74,9 +75,10 @@ func (s *Server) handlePartComplete(event controller.ControllerEvent) {
 		zap.String("message_id", event.MessageID),
 		zap.String("part_id", event.PartID),
 		zap.String("part_type", string(event.PartType)),
+		zap.String("role", event.Role),
 		zap.String("content", truncate(event.Content, 100)),
 	)
-	if event.PartType == controller.PartTypeText {
+	if event.PartType == controller.PartTypeText && event.Role == "assistant" {
 		s.sendMessageToDiscord(event)
 	}
 	// TODO: Discord 메시지 업데이트
