@@ -25,7 +25,7 @@ func (c *Controller) OnStarted(taskID string, sessionID string) error {
 // OnEvent는 Runner가 SSE 이벤트를 수신할 때 호출됩니다.
 // 이를 통해 Connector에 실시간으로 메시지를 전달합니다.
 func (c *Controller) OnEvent(taskID string, evt *taskrunner.Event) error {
-	c.logger.Info("OnEvent callback",
+	c.logger.Debug("OnEvent callback",
 		zap.String("task_id", taskID),
 		zap.String("event_type", evt.Type),
 		zap.Any("properties", evt.Properties),
@@ -62,7 +62,7 @@ func (c *Controller) OnEvent(taskID string, evt *taskrunner.Event) error {
 
 					// PartComplete 시 메시지 role 정보 가져오기
 					if messageID != "" {
-						c.logger.Info("Fetching message role",
+						c.logger.Debug("Fetching message role",
 							zap.String("task_id", taskID),
 							zap.String("message_id", messageID),
 						)
@@ -200,7 +200,7 @@ func (c *Controller) OnEvent(taskID string, evt *taskrunner.Event) error {
 
 // OnComplete는 Task가 완료될 때 호출됩니다.
 func (c *Controller) OnComplete(taskID string, result *taskrunner.RunResult) error {
-	c.logger.Info("OnComplete callback",
+	c.logger.Debug("OnComplete callback",
 		zap.String("task_id", taskID),
 		zap.Bool("success", result.Success),
 		zap.String("output", result.Output),
