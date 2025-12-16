@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cnap-oss/app/internal/common"
 	"github.com/cnap-oss/app/internal/connector"
 	"github.com/cnap-oss/app/internal/controller"
 	"github.com/cnap-oss/app/internal/storage"
@@ -72,25 +73,7 @@ func main() {
 
 // initLogger는 zap logger를 초기화합니다.
 func initLogger() (*zap.Logger, error) {
-	env := os.Getenv("ENV")
-	logLevel := os.Getenv("LOG_LEVEL")
-
-	var config zap.Config
-	if env == "production" {
-		config = zap.NewProductionConfig()
-	} else {
-		config = zap.NewDevelopmentConfig()
-	}
-
-	// LOG_LEVEL 환경변수가 설정되어 있으면 적용
-	if logLevel != "" {
-		level, err := zap.ParseAtomicLevel(logLevel)
-		if err == nil {
-			config.Level = level
-		}
-	}
-
-	return config.Build()
+	return common.NewLogger("")
 }
 
 // runStart는 controller와 connector 서버를 시작합니다.

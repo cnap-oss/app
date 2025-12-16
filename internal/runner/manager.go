@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cnap-oss/app/internal/common"
 	"go.uber.org/zap"
 )
 
@@ -50,7 +51,7 @@ var (
 func GetRunnerManager(opts ...RunnerManagerOption) *RunnerManager {
 	once.Do(func() {
 		// 기본 로거 설정
-		l, _ := zap.NewDevelopment()
+		l := common.MustNewLogger("runner-manager")
 
 		instance = &RunnerManager{
 			runners: make(map[string]*Runner),
