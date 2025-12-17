@@ -266,18 +266,18 @@ Status values are defined in `internal/storage/constants.go`. Always use these c
 
 ### Database Configuration
 
-- `DATABASE_URL`: PostgreSQL DSN (required, e.g., `postgres://user:pass@localhost:5432/cnap?sslmode=disable`)
-- `DB_LOG_LEVEL`: GORM log level (silent, error, warn, info) - default: warn
-- `DB_MAX_IDLE`: Connection pool idle count - default: 5
-- `DB_MAX_OPEN`: Connection pool max count - default: 20
-- `DB_CONN_LIFETIME`: Connection max lifetime - default: 30m
-- `DB_SKIP_DEFAULT_TXN`: Skip default transaction - default: true
-- `DB_PREPARE_STMT`: Enable prepared statement cache - default: false
+- `CNAP_DB_DSN`: PostgreSQL DSN (required, e.g., `postgres://user:pass@localhost:5432/cnap?sslmode=disable`)
+- `CNAP_DB_LOG_LEVEL`: GORM log level (silent, error, warn, info) - default: warn
+- `CNAP_DB_MAX_IDLE`: Connection pool idle count - default: 5
+- `CNAP_DB_MAX_OPEN`: Connection pool max count - default: 20
+- `CNAP_DB_CONN_LIFETIME`: Connection max lifetime - default: 30m
+- `CNAP_DB_SKIP_DEFAULT_TXN`: Skip default transaction - default: true
+- `CNAP_DB_PREPARE_STMT`: Enable prepared statement cache - default: false
 
 ### Application Configuration
 
-- `ENV`: Environment (development, production)
-- `LOG_LEVEL`: Application log level (debug, info, warn, error)
+- `CNAP_ENV`: Environment (development, production)
+- `CNAP_LOG_LEVEL`: Application log level (debug, info, warn, error)
 
 ### Docker Compose Variables
 

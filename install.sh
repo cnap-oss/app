@@ -259,7 +259,7 @@ create_config() {
     echo "   - Bot Permissions: Send Messages, Read Messages, etc."
     echo "7. 생성된 URL로 봇을 서버에 초대"
     echo ""
-    read -p "Discord Bot Token을 입력하세요: " DISCORD_TOKEN
+    read -p "Discord Bot Token을 입력하세요: " CNAP_DISCORD_TOKEN
     
     echo ""
     echo "════════════════════════════════════════"
@@ -274,7 +274,7 @@ create_config() {
     echo "5. API Key 이름 설정 및 생성"
     echo "6. 생성된 API Key 복사 (한 번만 표시됨)"
     echo ""
-    read -p "OpenCode Zen API Key를 입력하세요: " OPENCODE_API_KEY
+    read -p "OpenCode Zen API Key를 입력하세요: " CNAP_OPENCODE_API_KEY
     
     # config.yml 생성
     cat > "$CONFIG_FILE" << EOF
@@ -300,11 +300,11 @@ database:
 
 # Discord Bot Configuration
 discord:
-  token: "${DISCORD_TOKEN}"
+  token: "${CNAP_DISCORD_TOKEN}"
 
 # API Keys Configuration
 api_keys:
-  opencode: "${OPENCODE_API_KEY}"
+  opencode: "${CNAP_OPENCODE_API_KEY}"
   anthropic: ""
   openai: ""
 

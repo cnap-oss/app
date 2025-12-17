@@ -55,9 +55,9 @@ func DefaultWorkspaceConfig() WorkspaceConfig {
 	configsDir := common.GetConfigsDir()
 	return WorkspaceConfig{
 		BaseDir:           common.GetWorkspaceDir(),
-		DefaultConfigPath: getEnvOrDefault("WORKSPACE_DEFAULT_CONFIG", filepath.Join(configsDir, "opencode", "default-config.json")),
-		DefaultMCPPath:    getEnvOrDefault("WORKSPACE_DEFAULT_MCP", filepath.Join(configsDir, "opencode", "default-mcp.json")),
-		MaxDiskUsageMB:    getEnvOrDefaultInt64("WORKSPACE_MAX_DISK_MB", 1024),
+		DefaultConfigPath: getEnvOrDefault("CNAP_WORKSPACE_DEFAULT_CONFIG", filepath.Join(configsDir, "opencode", "default-config.json")),
+		DefaultMCPPath:    getEnvOrDefault("CNAP_WORKSPACE_DEFAULT_MCP", filepath.Join(configsDir, "opencode", "default-mcp.json")),
+		MaxDiskUsageMB:    getEnvOrDefaultInt64("CNAP_WORKSPACE_MAX_DISK_MB", 1024),
 	}
 }
 

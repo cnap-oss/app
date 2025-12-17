@@ -51,7 +51,7 @@ func (s *Connector) Start(ctx context.Context) error {
 	s.config = cfg
 
 	if cfg.Discord.Token == "" {
-		return fmt.Errorf("DISCORD_TOKEN environment variable not set")
+		return fmt.Errorf("CNAP_DISCORD_TOKEN environment variable not set")
 	}
 
 	dg, err := discordgo.New("Bot " + cfg.Discord.Token)

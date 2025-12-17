@@ -53,11 +53,11 @@ type LifecycleConfig struct {
 // DefaultLifecycleConfig는 기본 수명 관리 설정을 반환합니다.
 func DefaultLifecycleConfig() LifecycleConfig {
 	return LifecycleConfig{
-		IdleTimeout:             getEnvOrDefaultDuration("RUNNER_IDLE_TIMEOUT", 5*time.Minute),
-		MaxRuntime:              getEnvOrDefaultDuration("RUNNER_MAX_RUNTIME", 30*time.Minute),
-		CleanupInterval:         getEnvOrDefaultDuration("RUNNER_CLEANUP_INTERVAL", 1*time.Minute),
-		MaxConcurrentContainers: getEnvOrDefaultInt("RUNNER_MAX_CONTAINERS", 10),
-		ShutdownTimeout:         getEnvOrDefaultDuration("RUNNER_SHUTDOWN_TIMEOUT", 30*time.Second),
+		IdleTimeout:             getEnvOrDefaultDuration("CNAP_RUNNER_IDLE_TIMEOUT", 5*time.Minute),
+		MaxRuntime:              getEnvOrDefaultDuration("CNAP_RUNNER_MAX_RUNTIME", 30*time.Minute),
+		CleanupInterval:         getEnvOrDefaultDuration("CNAP_RUNNER_CLEANUP_INTERVAL", 1*time.Minute),
+		MaxConcurrentContainers: getEnvOrDefaultInt("CNAP_RUNNER_MAX_CONTAINERS", 10),
+		ShutdownTimeout:         getEnvOrDefaultDuration("CNAP_RUNNER_SHUTDOWN_TIMEOUT", 30*time.Second),
 	}
 }
 

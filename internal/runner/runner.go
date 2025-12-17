@@ -227,7 +227,7 @@ func NewRunner(taskID string, agentInfo AgentInfo, callback StatusCallback, logg
 	}
 
 	// 기본 설정
-	workspaceBaseDir := os.Getenv("RUNNER_WORKSPACE_DIR")
+	workspaceBaseDir := os.Getenv("CNAP_RUNNER_WORKSPACE_DIR")
 	if workspaceBaseDir == "" {
 		workspaceBaseDir = "./data/workspace"
 	}
@@ -294,15 +294,15 @@ func (r *Runner) Start(ctx context.Context) error {
 	// 환경 변수 구성
 	env := r.buildEnvironmentVariables()
 
-	// Docker 이미지 이름 - ENV에 따라 분기
-	imageName := os.Getenv("RUNNER_IMAGE")
+	// Docker 이미지 이름 - CNAP_ENV에 따라 분기
+	imageName := os.Getenv("CNAP_RUNNER_IMAGE")
 	if imageName == "" {
 		// 환경별 기본 이미지 설정 (기본값: production)
-		env := os.Getenv("ENV")
+		env := os.Getenv("CNAP_ENV")
 		if env == "development" {
 			imageName = "cnap-runner:latest"
 		} else {
-			// production 또는 ENV 미설정 시 ghcr.io 이미지 사용
+			// production 또는 CNAP_ENV 미설정 시 ghcr.io 이미지 사용
 			imageName = "ghcr.io/cnap-oss/cnap-runner:latest"
 		}
 	}
@@ -544,18 +544,14 @@ func (r *Runner) buildEnvironmentVariables() []string {
 	}
 
 	// API 키 전달 (환경 변수에서 읽기)
-	if apiKey := os.Getenv("OPENCODE_API_KEY"); apiKey != "" {
+	if apiKey := os.Getenv("CNAP_OPENCODE_API_KEY"); apiKey != "" {
 		env = append(env, fmt.Sprintf("OPENCODE_API_KEY=%s", apiKey))
 	}
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+	if apiKey := os.Getenv("CNAP_ANTHROPIC_API_KEY"); apiKey != "" {
 		env = append(env, fmt.Sprintf("ANTHROPIC_API_KEY=%s", apiKey))
 	}
-	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
+	if apiKey := os.Getenv("CNAP_OPENAI_API_KEY"); apiKey != "" {
 		env = append(env, fmt.Sprintf("OPENAI_API_KEY=%s", apiKey))
-	}
-	// 레거시 지원
-	if apiKey := os.Getenv("OPEN_CODE_API_KEY"); apiKey != "" {
-		env = append(env, fmt.Sprintf("OPENCODE_API_KEY=%s", apiKey))
 	}
 
 	return env
