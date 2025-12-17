@@ -301,10 +301,17 @@ func (r *Runner) Start(ctx context.Context) error {
 	// 환경 변수 구성
 	env := r.buildEnvironmentVariables()
 
-	// Docker 이미지 이름
+	// Docker 이미지 이름 - ENV에 따라 분기
 	imageName := os.Getenv("RUNNER_IMAGE")
 	if imageName == "" {
-		imageName = "cnap-runner:latest"
+		// 환경별 기본 이미지 설정 (기본값: production)
+		env := os.Getenv("ENV")
+		if env == "development" {
+			imageName = "cnap-runner:latest"
+		} else {
+			// production 또는 ENV 미설정 시 ghcr.io 이미지 사용
+			imageName = "ghcr.io/cnap-oss/cnap-runner:latest"
+		}
 	}
 
 	// Container 생성
