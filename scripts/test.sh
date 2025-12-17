@@ -171,8 +171,8 @@ run_integration_tests() {
     print_info "통합 테스트 환경 확인..."
     
     # 통합 테스트 환경 변수 설정
-    export ENV=integration
-    export LOG_LEVEL=info
+    export CNAP_ENV=integration
+    export CNAP_LOG_LEVEL=info
     
     print_info "통합 테스트 실행..."
     go test $TEST_FLAGS \

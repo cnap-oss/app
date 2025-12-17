@@ -33,9 +33,9 @@ print_info() {
 
 # 설정
 CNAP_BIN="./bin/cnap"
-DATABASE_URL="${DATABASE_URL:-postgres://cnap:cnap@localhost:5432/cnap_test?sslmode=disable}"
-export DATABASE_URL
-export OPEN_CODE_API_KEY="${OPEN_CODE_API_KEY:-test-key}"
+CNAP_DB_DSN="${CNAP_DB_DSN:-postgres://cnap:cnap@localhost:5432/cnap_test?sslmode=disable}"
+export CNAP_DB_DSN
+export CNAP_OPENCODE_API_KEY="${CNAP_OPENCODE_API_KEY:-test-key}"
 
 # 테스트 전 준비
 setup() {

@@ -151,8 +151,8 @@ CNAP은 두 가지 방법으로 설정할 수 있습니다:
 cp .env.example .env
 
 # 필수 설정 입력
-# - DISCORD_TOKEN: Discord 봇 토큰
-# - OPENCODE_API_KEY: OpenCode API 키
+# - CNAP_DISCORD_TOKEN: Discord 봇 토큰
+# - CNAP_OPENCODE_API_KEY: OpenCode API 키
 ```
 
 #### 방법 2: YAML 설정 파일
@@ -172,16 +172,16 @@ cp config.example.yml config.yml
 
 **주요 설정 항목:**
 
-| 설정             | 환경 변수           | YAML 경로            | 설명                   |
-| ---------------- | ------------------- | -------------------- | ---------------------- |
-| Discord 토큰     | `DISCORD_TOKEN`     | `discord.token`      | Discord 봇 토큰 (필수) |
-| OpenCode API 키  | `OPENCODE_API_KEY`  | `api_keys.opencode`  | OpenCode API 키 (필수) |
-| Anthropic API 키 | `ANTHROPIC_API_KEY` | `api_keys.anthropic` | Anthropic API 키       |
-| OpenAI API 키    | `OPENAI_API_KEY`    | `api_keys.openai`    | OpenAI API 키          |
-| 실행 환경        | `ENV`               | `app.env`            | development/production |
-| 로그 레벨        | `LOG_LEVEL`         | `app.log_level`      | debug/info/warn/error  |
-| 데이터베이스 URL | `DATABASE_URL`      | `database.dsn`       | PostgreSQL DSN         |
-| Runner 이미지    | `RUNNER_IMAGE`      | `runner.image`       | Docker 이미지 이름     |
+| 설정             | 환경 변수                | YAML 경로            | 설명                   |
+| ---------------- | ------------------------ | -------------------- | ---------------------- |
+| Discord 토큰     | `CNAP_DISCORD_TOKEN`     | `discord.token`      | Discord 봇 토큰 (필수) |
+| OpenCode API 키  | `CNAP_OPENCODE_API_KEY`  | `api_keys.opencode`  | OpenCode API 키 (필수) |
+| Anthropic API 키 | `CNAP_ANTHROPIC_API_KEY` | `api_keys.anthropic` | Anthropic API 키       |
+| OpenAI API 키    | `CNAP_OPENAI_API_KEY`    | `api_keys.openai`    | OpenAI API 키          |
+| 실행 환경        | `CNAP_ENV`               | `app.env`            | development/production |
+| 로그 레벨        | `CNAP_LOG_LEVEL`         | `app.log_level`      | debug/info/warn/error  |
+| 데이터베이스 DSN | `CNAP_DB_DSN`            | `database.dsn`       | PostgreSQL DSN         |
+| Runner 이미지    | `CNAP_RUNNER_IMAGE`      | `runner.image`       | Docker 이미지 이름     |
 
 전체 설정 항목은 [`config.example.yml`](config.example.yml) 또는 [`.env.example`](.env.example)을 참고하세요.
 
@@ -191,7 +191,7 @@ CNAP CLI를 사용한 기본 파이프라인입니다. 자세한 내용은 [CLI 
 
 ```bash
 # 환경 변수 설정
-export OPENCODE_API_KEY="your-api-key"
+export CNAP_OPENCODE_API_KEY="your-api-key"
 
 # Agent 생성
 echo -e "my-bot\nAI 비서\ngpt-4\n친절한 AI입니다" | ./bin/cnap agent create
@@ -231,8 +231,8 @@ CLI 통합 테스트는 전체 플로우(Agent 생성 → Task 실행 → 상태
 
 ```bash
 # 사전 준비: PostgreSQL 실행 및 환경 변수 설정
-export DATABASE_URL="postgres://cnap:cnap@localhost:5432/cnap_test?sslmode=disable"
-export OPEN_CODE_API_KEY="your-api-key"
+export CNAP_DB_DSN="postgres://cnap:cnap@localhost:5432/cnap_test?sslmode=disable"
+export CNAP_OPENCODE_API_KEY="your-api-key"
 
 # 통합 테스트 실행
 ./scripts/integration_test.sh
@@ -254,8 +254,8 @@ CNAP은 PostgreSQL과 GORM을 사용하여 다음 엔티티를 관리합니다.
 
 | 변수                   | 필수 | 설명                                               | 기본값             |
 | ---------------------- | ---- | -------------------------------------------------- | ------------------ |
-| `DATABASE_URL`         |      | PostgreSQL 연결 DSN                                | SQLite (로컬 파일) |
-| `DB_LOG_LEVEL`         |      | GORM 로그 레벨 (`silent`, `error`, `warn`, `info`) | `warn`             |
+| `CNAP_DB_DSN`          |      | PostgreSQL 연결 DSN                                | SQLite (로컬 파일) |
+| `CNAP_DB_LOG_LEVEL`    |      | GORM 로그 레벨 (`silent`, `error`, `warn`, `info`) | `warn`             |
 | `DB_MAX_IDLE`          |      | 연결 풀 idle 개수                                  | `5`                |
 | `DB_MAX_OPEN`          |      | 연결 풀 최대 개수                                  | `20`               |
 | `DB_CONN_LIFETIME`     |      | 연결 최대 수명 (예: `1h`)                          | `30m`              |

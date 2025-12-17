@@ -30,9 +30,9 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-cnap}:${POSTGRES_PASSWORD:-cnap}@postgres:5432/${POSTGRES_DB:-cnap}?sslmode=disable
-      ENV: ${APP_ENV:-development}
-      LOG_LEVEL: ${APP_LOG_LEVEL:-info}
+      CNAP_DB_DSN: postgres://${POSTGRES_USER:-cnap}:${POSTGRES_PASSWORD:-cnap}@postgres:5432/${POSTGRES_DB:-cnap}?sslmode=disable
+      CNAP_ENV: ${APP_ENV:-development}
+      CNAP_LOG_LEVEL: ${APP_LOG_LEVEL:-info}
     env_file:
       - ../internal/connector/.env
     volumes:
