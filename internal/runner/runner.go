@@ -701,13 +701,14 @@ func (r *Runner) runInternal(ctx context.Context, req *RunRequest) error {
 		})
 	}
 
-	// 프롬프트 전송
+	// 프롬프트 전송 (Agent의 기본 프롬프트를 시스템 프롬프트로 사용)
 	promptReq := &opencode.PromptRequest{
 		Model: &opencode.PromptModel{
 			ProviderID: providerID,
 			ModelID:    modelID,
 		},
-		Parts: parts,
+		System: r.agentInfo.Prompt, // Agent의 기본 프롬프트 추가
+		Parts:  parts,
 	}
 
 	_, err := r.apiClient.Message(ctx, r.sessionID, promptReq)
