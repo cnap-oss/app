@@ -18,11 +18,29 @@ import (
 )
 
 var (
-	Version   = "dev"
-	BuildTime = "unknown"
+	Version    = "dev"
+	BuildTime  = "unknown"
+	configPath string
 )
 
 func main() {
+	rootCmd := &cobra.Command{
+		Use:     "cnap",
+		Short:   "CNAP - AI Agent Supervisor CLI",
+		Long:    `CNAP is a command-line interface for managing AI agent supervisor and connector servers.`,
+		Version: fmt.Sprintf("%s (built at %s)", Version, BuildTime),
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Config 초기화 (모든 명령어 실행 전)
+			if err := common.InitConfig(configPath); err != nil {
+				return fmt.Errorf("failed to initialize config: %w", err)
+			}
+			return nil
+		},
+	}
+
+	// --config 플래그 추가 (모든 서브커맨드에서 사용 가능)
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "config file path (default: $CNAP_DIR/config.yaml or env vars)")
+
 	// Logger 초기화
 	logger, err := initLogger()
 	if err != nil {
@@ -30,13 +48,6 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.Sync()
-
-	rootCmd := &cobra.Command{
-		Use:     "cnap",
-		Short:   "CNAP - AI Agent Supervisor CLI",
-		Long:    `CNAP is a command-line interface for managing AI agent supervisor and connector servers.`,
-		Version: fmt.Sprintf("%s (built at %s)", Version, BuildTime),
-	}
 
 	// start 명령어
 	startCmd := &cobra.Command{
