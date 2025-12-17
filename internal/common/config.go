@@ -3,6 +3,7 @@ package common
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -75,8 +76,8 @@ type RunnerConfig struct {
 
 // DirectoryConfig는 디렉토리 경로 설정입니다.
 type DirectoryConfig struct {
-	// CNAPDir은 기본 데이터 디렉토리입니다 (기본값: $HOME/.cnap)
-	CNAPDir string `yaml:"cnap_dir"`
+	// CNAPDir은 기본 데이터 디렉토리입니다 (환경 변수 CNAP_DIR로만 설정 가능, 기본값: $HOME/.cnap)
+	CNAPDir string `yaml:"-"`
 	// WorkspaceBaseDir은 워크스페이스 기본 디렉토리입니다
 	WorkspaceBaseDir string `yaml:"workspace_base_dir"`
 	// SQLiteDatabase는 SQLite 데이터베이스 파일 경로입니다
@@ -90,11 +91,18 @@ var (
 )
 
 // InitConfig는 설정을 초기화합니다.
-// configPath가 비어있으면 환경 변수에서 로드하고, 그렇지 않으면 YAML 파일에서 로드합니다.
+// configPath가 비어있으면 ${CNAP_DIR}/config.yaml에서 로드를 시도하고, 파일이 없으면 환경 변수에서 로드합니다.
+// 파일에서 로드한 후 환경 변수로 오버라이드됩니다.
 func InitConfig(configPath string) error {
 	var err error
 	once.Do(func() {
-		if configPath != "" {
+		if configPath == "" {
+			// CNAP_DIR 기본 경로 사용
+			configPath = filepath.Join(getCNAPDir(), "config.yaml")
+		}
+
+		// 파일이 존재하면 파일에서 로드, 없으면 환경 변수에서 로드
+		if _, statErr := os.Stat(configPath); statErr == nil {
 			instance, err = LoadConfigFromFile(configPath)
 		} else {
 			instance, err = LoadConfigFromEnv()
@@ -156,57 +164,57 @@ func LoadConfigFromEnv() (*Config, error) {
 // mergeWithEnv는 YAML 설정을 환경 변수로 오버라이드합니다.
 func mergeWithEnv(cfg *Config) *Config {
 	// App
-	if env := os.Getenv("ENV"); env != "" {
+	if env := os.Getenv("CNAP_ENV"); env != "" {
 		cfg.App.ENV = env
 	}
-	if logLevel := os.Getenv("LOG_LEVEL"); logLevel != "" {
+	if logLevel := os.Getenv("CNAP_LOG_LEVEL"); logLevel != "" {
 		cfg.App.LogLevel = logLevel
 	}
 
 	// Database
-	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+	if dsn := os.Getenv("CNAP_DB_DSN"); dsn != "" {
 		cfg.Database.DSN = dsn
 	}
-	if logLevel := os.Getenv("DB_LOG_LEVEL"); logLevel != "" {
+	if logLevel := os.Getenv("CNAP_DB_LOG_LEVEL"); logLevel != "" {
 		cfg.Database.LogLevel = parseLogLevel(logLevel)
 	}
-	if maxIdle := os.Getenv("DB_MAX_IDLE"); maxIdle != "" {
+	if maxIdle := os.Getenv("CNAP_DB_MAX_IDLE"); maxIdle != "" {
 		cfg.Database.MaxIdleConns = parseIntWithDefault(maxIdle, cfg.Database.MaxIdleConns)
 	}
-	if maxOpen := os.Getenv("DB_MAX_OPEN"); maxOpen != "" {
+	if maxOpen := os.Getenv("CNAP_DB_MAX_OPEN"); maxOpen != "" {
 		cfg.Database.MaxOpenConns = parseIntWithDefault(maxOpen, cfg.Database.MaxOpenConns)
 	}
-	if lifetime := os.Getenv("DB_CONN_LIFETIME"); lifetime != "" {
+	if lifetime := os.Getenv("CNAP_DB_CONN_LIFETIME"); lifetime != "" {
 		cfg.Database.ConnMaxLifetime = parseDurationWithDefault(lifetime, cfg.Database.ConnMaxLifetime)
 	}
-	if skipTxn := os.Getenv("DB_SKIP_DEFAULT_TXN"); skipTxn != "" {
+	if skipTxn := os.Getenv("CNAP_DB_SKIP_DEFAULT_TXN"); skipTxn != "" {
 		cfg.Database.SkipDefaultTxn = parseBoolWithDefault(skipTxn, cfg.Database.SkipDefaultTxn)
 	}
-	if prepStmt := os.Getenv("DB_PREPARE_STMT"); prepStmt != "" {
+	if prepStmt := os.Getenv("CNAP_DB_PREPARE_STMT"); prepStmt != "" {
 		cfg.Database.PrepareStmt = parseBoolWithDefault(prepStmt, cfg.Database.PrepareStmt)
 	}
 
 	// Discord
-	if token := os.Getenv("DISCORD_TOKEN"); token != "" {
+	if token := os.Getenv("CNAP_DISCORD_TOKEN"); token != "" {
 		cfg.Discord.Token = token
 	}
 
 	// API Keys
-	if apiKey := os.Getenv("OPENCODE_API_KEY"); apiKey != "" {
+	if apiKey := os.Getenv("CNAP_OPENCODE_API_KEY"); apiKey != "" {
 		cfg.APIKeys.OpenCode = apiKey
 	}
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+	if apiKey := os.Getenv("CNAP_ANTHROPIC_API_KEY"); apiKey != "" {
 		cfg.APIKeys.Anthropic = apiKey
 	}
-	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
+	if apiKey := os.Getenv("CNAP_OPENAI_API_KEY"); apiKey != "" {
 		cfg.APIKeys.OpenAI = apiKey
 	}
 
 	// Runner
-	if image := os.Getenv("RUNNER_IMAGE"); image != "" {
+	if image := os.Getenv("CNAP_RUNNER_IMAGE"); image != "" {
 		cfg.Runner.Image = image
 	}
-	if workspaceDir := os.Getenv("RUNNER_WORKSPACE_DIR"); workspaceDir != "" {
+	if workspaceDir := os.Getenv("CNAP_RUNNER_WORKSPACE_DIR"); workspaceDir != "" {
 		cfg.Runner.WorkspaceDir = workspaceDir
 	}
 
@@ -214,10 +222,10 @@ func mergeWithEnv(cfg *Config) *Config {
 	if cnapDir := os.Getenv("CNAP_DIR"); cnapDir != "" {
 		cfg.Directory.CNAPDir = cnapDir
 	}
-	if workspaceBaseDir := os.Getenv("WORKSPACE_BASE_DIR"); workspaceBaseDir != "" {
+	if workspaceBaseDir := os.Getenv("CNAP_WORKSPACE_BASE_DIR"); workspaceBaseDir != "" {
 		cfg.Directory.WorkspaceBaseDir = workspaceBaseDir
 	}
-	if sqliteDB := os.Getenv("SQLITE_DATABASE"); sqliteDB != "" {
+	if sqliteDB := os.Getenv("CNAP_SQLITE_DATABASE"); sqliteDB != "" {
 		cfg.Directory.SQLiteDatabase = sqliteDB
 	}
 
@@ -226,29 +234,35 @@ func mergeWithEnv(cfg *Config) *Config {
 
 func loadAppConfig() AppConfig {
 	return AppConfig{
-		ENV:      getEnvOrDefault("ENV", "production"),
-		LogLevel: getEnvOrDefault("LOG_LEVEL", "info"),
+		ENV:      getEnvOrDefault("CNAP_ENV", "production"),
+		LogLevel: getEnvOrDefault("CNAP_LOG_LEVEL", "info"),
 	}
 }
 
 func loadDatabaseConfig() DatabaseConfig {
-	dsn := os.Getenv("DATABASE_URL")
+	dsn := os.Getenv("CNAP_DATABASE_URL")
 	if dsn == "" {
-		// DATABASE_URL이 없으면 SQLite 기본값 사용 (로컬 개발용)
-		dsn = GetDatabasePath()
+		// CNAP_DATABASE_URL이 없으면 SQLite 기본값 사용 (로컬 개발용)
+		// GetDatabasePath() 호출 대신 직접 계산 (순환 참조 방지)
+		sqliteDB := os.Getenv("CNAP_SQLITE_DATABASE")
+		if sqliteDB == "" {
+			cnapDir := getCNAPDir()
+			sqliteDB = filepath.Join(cnapDir, "cnap.db")
+		}
+		dsn = sqliteDB
 	}
 
 	cfg := DatabaseConfig{
 		DSN:             dsn,
-		LogLevel:        parseLogLevel(os.Getenv("DB_LOG_LEVEL")),
-		MaxIdleConns:    parseIntWithDefault(os.Getenv("DB_MAX_IDLE"), 5),
-		MaxOpenConns:    parseIntWithDefault(os.Getenv("DB_MAX_OPEN"), 20),
-		ConnMaxLifetime: parseDurationWithDefault(os.Getenv("DB_CONN_LIFETIME"), 30*time.Minute),
-		SkipDefaultTxn:  parseBoolWithDefault(os.Getenv("DB_SKIP_DEFAULT_TXN"), true),
-		PrepareStmt:     parseBoolWithDefault(os.Getenv("DB_PREPARE_STMT"), false),
+		LogLevel:        parseLogLevel(os.Getenv("CNAP_DB_LOG_LEVEL")),
+		MaxIdleConns:    parseIntWithDefault(os.Getenv("CNAP_DB_MAX_IDLE"), 5),
+		MaxOpenConns:    parseIntWithDefault(os.Getenv("CNAP_DB_MAX_OPEN"), 20),
+		ConnMaxLifetime: parseDurationWithDefault(os.Getenv("CNAP_DB_CONN_LIFETIME"), 30*time.Minute),
+		SkipDefaultTxn:  parseBoolWithDefault(os.Getenv("CNAP_DB_SKIP_DEFAULT_TXN"), true),
+		PrepareStmt:     parseBoolWithDefault(os.Getenv("CNAP_DB_PREPARE_STMT"), false),
 	}
 
-	if v, ok := lookupEnvBool("DB_DISABLE_AUTO_PING"); ok {
+	if v, ok := lookupEnvBool("CNAP_DB_DISABLE_AUTO_PING"); ok {
 		cfg.DisableAutomaticPing = v
 	}
 
@@ -257,27 +271,27 @@ func loadDatabaseConfig() DatabaseConfig {
 
 func loadDiscordConfig() DiscordConfig {
 	return DiscordConfig{
-		Token: os.Getenv("DISCORD_TOKEN"),
+		Token: os.Getenv("CNAP_DISCORD_TOKEN"),
 	}
 }
 
 func loadAPIKeysConfig() APIKeysConfig {
 	return APIKeysConfig{
-		OpenCode:  os.Getenv("OPENCODE_API_KEY"),
-		Anthropic: os.Getenv("ANTHROPIC_API_KEY"),
-		OpenAI:    os.Getenv("OPENAI_API_KEY"),
+		OpenCode:  os.Getenv("CNAP_OPENCODE_API_KEY"),
+		Anthropic: os.Getenv("CNAP_ANTHROPIC_API_KEY"),
+		OpenAI:    os.Getenv("CNAP_OPENAI_API_KEY"),
 	}
 }
 
 func loadRunnerConfig() RunnerConfig {
 	cfg := RunnerConfig{
-		Image:        os.Getenv("RUNNER_IMAGE"),
-		WorkspaceDir: os.Getenv("RUNNER_WORKSPACE_DIR"),
+		Image:        os.Getenv("CNAP_RUNNER_IMAGE"),
+		WorkspaceDir: os.Getenv("CNAP_RUNNER_WORKSPACE_DIR"),
 	}
 
-	// RUNNER_IMAGE가 설정되지 않은 경우 ENV에 따라 기본값 설정
+	// CNAP_RUNNER_IMAGE가 설정되지 않은 경우 CNAP_ENV에 따라 기본값 설정
 	if cfg.Image == "" {
-		env := getEnvOrDefault("ENV", "production")
+		env := getEnvOrDefault("CNAP_ENV", "production")
 		if env == "development" {
 			cfg.Image = "cnap-runner:latest"
 		} else {
@@ -290,10 +304,26 @@ func loadRunnerConfig() RunnerConfig {
 
 func loadDirectoryConfig() DirectoryConfig {
 	return DirectoryConfig{
-		CNAPDir:          os.Getenv("CNAP_DIR"),
-		WorkspaceBaseDir: os.Getenv("WORKSPACE_BASE_DIR"),
-		SQLiteDatabase:   os.Getenv("SQLITE_DATABASE"),
+		CNAPDir:          getCNAPDir(),
+		WorkspaceBaseDir: os.Getenv("CNAP_WORKSPACE_BASE_DIR"),
+		SQLiteDatabase:   os.Getenv("CNAP_SQLITE_DATABASE"),
 	}
+}
+
+// getCNAPDir은 CNAP_DIR 환경 변수를 반환하거나 기본값을 계산합니다.
+func getCNAPDir() string {
+	cnapDir := os.Getenv("CNAP_DIR")
+	if cnapDir != "" {
+		return cnapDir
+	}
+
+	// CNAP_DIR이 없으면 $HOME/.cnap 사용
+	if homeDir := os.Getenv("HOME"); homeDir != "" {
+		return filepath.Join(homeDir, ".cnap")
+	}
+
+	// Fallback: ./data
+	return "./data"
 }
 
 // Helper functions
@@ -368,10 +398,10 @@ func lookupEnvBool(key string) (bool, bool) {
 // Validate는 필수 설정 값들을 검증합니다.
 func (c *Config) Validate() error {
 	if c.Discord.Token == "" {
-		return fmt.Errorf("DISCORD_TOKEN is required")
+		return fmt.Errorf("CNAP_DISCORD_TOKEN is required")
 	}
 	if c.APIKeys.OpenCode == "" {
-		return fmt.Errorf("OPENCODE_API_KEY is required")
+		return fmt.Errorf("CNAP_OPENCODE_API_KEY is required")
 	}
 	return nil
 }
@@ -380,13 +410,13 @@ func (c *Config) Validate() error {
 func (c *Config) GetAPIKeyEnvVars() []string {
 	var env []string
 	if c.APIKeys.OpenCode != "" {
-		env = append(env, fmt.Sprintf("OPENCODE_API_KEY=%s", c.APIKeys.OpenCode))
+		env = append(env, fmt.Sprintf("CNAP_OPENCODE_API_KEY=%s", c.APIKeys.OpenCode))
 	}
 	if c.APIKeys.Anthropic != "" {
-		env = append(env, fmt.Sprintf("ANTHROPIC_API_KEY=%s", c.APIKeys.Anthropic))
+		env = append(env, fmt.Sprintf("CNAP_ANTHROPIC_API_KEY=%s", c.APIKeys.Anthropic))
 	}
 	if c.APIKeys.OpenAI != "" {
-		env = append(env, fmt.Sprintf("OPENAI_API_KEY=%s", c.APIKeys.OpenAI))
+		env = append(env, fmt.Sprintf("CNAP_OPENAI_API_KEY=%s", c.APIKeys.OpenAI))
 	}
 	return env
 }
