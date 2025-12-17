@@ -136,19 +136,19 @@ type Runner struct {
 	WorkspacePath string // 마운트된 작업 공간 경로
 
 	// 세션 관리 (Runner 생명 주기 동안 유지)
-	apiClient   *opencode.Client   // OpenCode API 클라이언트
-	session     *opencode.Session  // OpenCode 세션
-	sessionID   string             // 세션 ID
-	eventCtx    context.Context    // 이벤트 스트림 컨텍스트
-	eventCancel context.CancelFunc // 이벤트 스트림 취소 함수
-	eventDone   chan error         // 이벤트 스트림 완료 채널
-	fullContent *strings.Builder   // 누적 컨텐츠
+	apiClient   *opencode.OpenCodeClient // OpenCode API 클라이언트
+	session     *opencode.Session        // OpenCode 세션
+	sessionID   string                   // 세션 ID
+	eventCtx    context.Context          // 이벤트 스트림 컨텍스트
+	eventCancel context.CancelFunc       // 이벤트 스트림 취소 함수
+	eventDone   chan error               // 이벤트 스트림 완료 채널
+	fullContent *strings.Builder         // 누적 컨텐츠
 
 	// 콜백 핸들러 (생성 시 등록)
 	callback StatusCallback
 
 	// 내부 의존성
-	dockerClient docker.Client
+	dockerClient docker.DockerClient
 	httpClient   *http.Client
 	logger       *zap.Logger
 
@@ -161,7 +161,7 @@ type Runner struct {
 type RunnerOption func(*Runner)
 
 // WithDockerClient는 Runner가 사용할 DockerClient를 주입합니다(테스트용).
-func WithDockerClient(client docker.Client) RunnerOption {
+func WithDockerClient(client docker.DockerClient) RunnerOption {
 	return func(r *Runner) {
 		r.dockerClient = client
 	}

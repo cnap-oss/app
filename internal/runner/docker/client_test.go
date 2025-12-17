@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// MockClient는 테스트용 Mock Client입니다.
-type MockClient struct {
+// MockDockerClient는 테스트용 Mock Client입니다.
+type MockDockerClient struct {
 	CreateContainerFunc  func(ctx context.Context, config ContainerConfig) (string, error)
 	StartContainerFunc   func(ctx context.Context, containerID string) error
 	StopContainerFunc    func(ctx context.Context, containerID string, timeout int) error
@@ -19,42 +19,42 @@ type MockClient struct {
 	CloseFunc            func() error
 }
 
-func (m *MockClient) CreateContainer(ctx context.Context, config ContainerConfig) (string, error) {
+func (m *MockDockerClient) CreateContainer(ctx context.Context, config ContainerConfig) (string, error) {
 	if m.CreateContainerFunc != nil {
 		return m.CreateContainerFunc(ctx, config)
 	}
 	return "mock-container-id", nil
 }
 
-func (m *MockClient) StartContainer(ctx context.Context, containerID string) error {
+func (m *MockDockerClient) StartContainer(ctx context.Context, containerID string) error {
 	if m.StartContainerFunc != nil {
 		return m.StartContainerFunc(ctx, containerID)
 	}
 	return nil
 }
 
-func (m *MockClient) StopContainer(ctx context.Context, containerID string, timeout int) error {
+func (m *MockDockerClient) StopContainer(ctx context.Context, containerID string, timeout int) error {
 	if m.StopContainerFunc != nil {
 		return m.StopContainerFunc(ctx, containerID, timeout)
 	}
 	return nil
 }
 
-func (m *MockClient) RemoveContainer(ctx context.Context, containerID string) error {
+func (m *MockDockerClient) RemoveContainer(ctx context.Context, containerID string) error {
 	if m.RemoveContainerFunc != nil {
 		return m.RemoveContainerFunc(ctx, containerID)
 	}
 	return nil
 }
 
-func (m *MockClient) ContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
+func (m *MockDockerClient) ContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
 	if m.ContainerLogsFunc != nil {
 		return m.ContainerLogsFunc(ctx, containerID)
 	}
 	return io.NopCloser(strings.NewReader("mock logs")), nil
 }
 
-func (m *MockClient) ContainerInspect(ctx context.Context, containerID string) (ContainerInfo, error) {
+func (m *MockDockerClient) ContainerInspect(ctx context.Context, containerID string) (ContainerInfo, error) {
 	if m.ContainerInspectFunc != nil {
 		return m.ContainerInspectFunc(ctx, containerID)
 	}
@@ -68,14 +68,14 @@ func (m *MockClient) ContainerInspect(ctx context.Context, containerID string) (
 	}, nil
 }
 
-func (m *MockClient) Ping(ctx context.Context) error {
+func (m *MockDockerClient) Ping(ctx context.Context) error {
 	if m.PingFunc != nil {
 		return m.PingFunc(ctx)
 	}
 	return nil
 }
 
-func (m *MockClient) Close() error {
+func (m *MockDockerClient) Close() error {
 	if m.CloseFunc != nil {
 		return m.CloseFunc()
 	}
@@ -83,11 +83,11 @@ func (m *MockClient) Close() error {
 }
 
 // 인터페이스 구현 확인
-var _ Client = (*MockClient)(nil)
+var _ DockerClient = (*MockDockerClient)(nil)
 
 func TestMockClient_CreateContainer(t *testing.T) {
 	ctx := context.Background()
-	mock := &MockClient{}
+	mock := &MockDockerClient{}
 
 	config := ContainerConfig{
 		Image: "test-image:latest",
@@ -107,7 +107,7 @@ func TestMockClient_CreateContainer(t *testing.T) {
 
 func TestMockClient_StartContainer(t *testing.T) {
 	ctx := context.Background()
-	mock := &MockClient{}
+	mock := &MockDockerClient{}
 
 	err := mock.StartContainer(ctx, "test-container-id")
 	if err != nil {
@@ -117,7 +117,7 @@ func TestMockClient_StartContainer(t *testing.T) {
 
 func TestMockClient_StopContainer(t *testing.T) {
 	ctx := context.Background()
-	mock := &MockClient{}
+	mock := &MockDockerClient{}
 
 	err := mock.StopContainer(ctx, "test-container-id", 10)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestMockClient_StopContainer(t *testing.T) {
 
 func TestMockClient_RemoveContainer(t *testing.T) {
 	ctx := context.Background()
-	mock := &MockClient{}
+	mock := &MockDockerClient{}
 
 	err := mock.RemoveContainer(ctx, "test-container-id")
 	if err != nil {
@@ -137,7 +137,7 @@ func TestMockClient_RemoveContainer(t *testing.T) {
 
 func TestMockClient_ContainerLogs(t *testing.T) {
 	ctx := context.Background()
-	mock := &MockClient{}
+	mock := &MockDockerClient{}
 
 	logs, err := mock.ContainerLogs(ctx, "test-container-id")
 	if err != nil {
@@ -159,7 +159,7 @@ func TestMockClient_ContainerLogs(t *testing.T) {
 
 func TestMockClient_ContainerInspect(t *testing.T) {
 	ctx := context.Background()
-	mock := &MockClient{}
+	mock := &MockDockerClient{}
 
 	info, err := mock.ContainerInspect(ctx, "test-container-id")
 	if err != nil {
@@ -181,7 +181,7 @@ func TestMockClient_ContainerInspect(t *testing.T) {
 
 func TestMockClient_Ping(t *testing.T) {
 	ctx := context.Background()
-	mock := &MockClient{}
+	mock := &MockDockerClient{}
 
 	err := mock.Ping(ctx)
 	if err != nil {
@@ -190,7 +190,7 @@ func TestMockClient_Ping(t *testing.T) {
 }
 
 func TestMockClient_Close(t *testing.T) {
-	mock := &MockClient{}
+	mock := &MockDockerClient{}
 
 	err := mock.Close()
 	if err != nil {
@@ -241,7 +241,7 @@ func TestGetContainerPort(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &MockClient{
+			mock := &MockDockerClient{
 				ContainerInspectFunc: func(ctx context.Context, containerID string) (ContainerInfo, error) {
 					return ContainerInfo{
 						ID:    containerID,

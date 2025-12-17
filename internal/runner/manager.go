@@ -13,7 +13,7 @@ import (
 // RunnerManager manages Runner instances.
 type RunnerManager struct {
 	runners          map[string]*Runner
-	dockerClient     docker.Client
+	dockerClient     docker.DockerClient
 	lifecycleManager LifecycleManager
 	mu               sync.RWMutex
 	logger           *zap.Logger
@@ -23,7 +23,7 @@ type RunnerManager struct {
 type RunnerManagerOption func(*RunnerManager)
 
 // WithDockerClientOption은 DockerClient를 주입합니다.
-func WithDockerClientOption(client docker.Client) RunnerManagerOption {
+func WithDockerClientOption(client docker.DockerClient) RunnerManagerOption {
 	return func(rm *RunnerManager) {
 		rm.dockerClient = client
 	}
