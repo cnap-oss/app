@@ -130,17 +130,34 @@ verify_checksum() {
     CHECKSUM_URL="https://github.com/$GITHUB_REPO/releases/download/${LATEST_VERSION}/${BINARY_NAME}.sha256"
     
     if curl -fsSL -o /tmp/cnap.sha256 "$CHECKSUM_URL" 2>/dev/null; then
+        # 체크섬 파일의 파일명을 실제 다운로드한 파일명으로 변경
+        sed "s/${BINARY_NAME}/cnap/" /tmp/cnap.sha256 > /tmp/cnap_fixed.sha256
+        
         cd "$BIN_DIR"
         if command -v shasum &> /dev/null; then
-            shasum -a 256 -c /tmp/cnap.sha256
+            if shasum -a 256 -c /tmp/cnap_fixed.sha256 2>/dev/null; then
+                log_success "체크섬 검증 완료"
+            else
+                log_error "체크섬 검증 실패. 다운로드한 파일이 손상되었을 수 있습니다."
+                rm -f "$BIN_DIR/cnap"
+                rm -f /tmp/cnap.sha256 /tmp/cnap_fixed.sha256
+                exit 1
+            fi
         elif command -v sha256sum &> /dev/null; then
-            sha256sum -c /tmp/cnap.sha256
+            if sha256sum -c /tmp/cnap_fixed.sha256 2>/dev/null; then
+                log_success "체크섬 검증 완료"
+            else
+                log_error "체크섬 검증 실패. 다운로드한 파일이 손상되었을 수 있습니다."
+                rm -f "$BIN_DIR/cnap"
+                rm -f /tmp/cnap.sha256 /tmp/cnap_fixed.sha256
+                exit 1
+            fi
         else
             log_warn "체크섬 검증 도구를 찾을 수 없습니다. 검증을 건너뜁니다."
+            rm -f /tmp/cnap.sha256 /tmp/cnap_fixed.sha256
             return
         fi
-        log_success "체크섬 검증 완료"
-        rm /tmp/cnap.sha256
+        rm -f /tmp/cnap.sha256 /tmp/cnap_fixed.sha256
     else
         log_warn "체크섬 파일을 다운로드할 수 없습니다. 검증을 건너뜁니다."
     fi
