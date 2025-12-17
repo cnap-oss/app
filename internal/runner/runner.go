@@ -690,9 +690,9 @@ func (r *Runner) runInternal(ctx context.Context, req *RunRequest) error {
 		Parts: parts,
 	}
 
-	err := r.apiClient.PromptAsync(ctx, r.sessionID, promptReq)
+	_, err := r.apiClient.Message(ctx, r.sessionID, promptReq)
 	if err != nil {
-		return fmt.Errorf("프롬프트 전송 실패: %w", err)
+		return fmt.Errorf("메시지 전송 실패: %w", err)
 	}
 
 	return nil
