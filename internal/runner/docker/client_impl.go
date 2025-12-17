@@ -17,7 +17,7 @@ type RealClient struct {
 }
 
 // NewClient는 새로운 RealClient를 생성합니다.
-func NewClient() (Client, error) {
+func NewClient() (DockerClient, error) {
 	cli, err := client.NewClientWithOpts(
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -215,7 +215,7 @@ func (d *RealClient) Close() error {
 }
 
 // GetContainerPort는 Container에 매핑된 호스트 포트를 반환합니다.
-func GetContainerPort(ctx context.Context, dockerClient Client, containerID string, containerPort string) (int, error) {
+func GetContainerPort(ctx context.Context, dockerClient DockerClient, containerID string, containerPort string) (int, error) {
 	info, err := dockerClient.ContainerInspect(ctx, containerID)
 	if err != nil {
 		return 0, fmt.Errorf("container 조회 실패: %w", err)
@@ -236,4 +236,4 @@ func GetContainerPort(ctx context.Context, dockerClient Client, containerID stri
 }
 
 // 인터페이스 구현 확인
-var _ Client = (*RealClient)(nil)
+var _ DockerClient = (*RealClient)(nil)
