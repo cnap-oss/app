@@ -10,6 +10,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// sendStatusUpdateEvent는 Task 상태 업데이트 이벤트를 전송합니다.
+func (c *Controller) sendStatusUpdateEvent(taskID, status string) {
+	c.controllerEventChan <- ControllerEvent{
+		EventType: EventTypeStatusUpdate,
+		TaskID:    taskID,
+		Status:    status,
+	}
+}
+
 // StatusCallback 인터페이스 구현 (Phase 1)
 
 // OnStarted는 Runner가 시작되고 세션이 생성될 때 호출됩니다.
@@ -26,7 +35,7 @@ func (c *Controller) OnStarted(taskID string, sessionID string) error {
 // OnEvent는 Runner가 SSE 이벤트를 수신할 때 호출됩니다.
 // 이를 통해 Connector에 실시간으로 메시지를 전달합니다.
 func (c *Controller) OnEvent(taskID string, evt *opencode.Event) error {
-	c.logger.Debug("OnEvent callback",
+	c.logger.Info("OnEvent callback",
 		zap.String("task_id", taskID),
 		zap.String("event_type", evt.Type),
 		zap.Any("properties", evt.Properties),
@@ -157,21 +166,17 @@ func (c *Controller) OnEvent(taskID string, evt *opencode.Event) error {
 					zap.String("status_type", statusType),
 				)
 
-				// status.type이 idle이고 Runner status가 running이면 Task status를 waiting으로 변경
+				// status.type이 idle이면 Task status를 waiting으로 변경
 				if statusType == "idle" {
-					runner := c.runnerManager.GetRunner(taskID)
-					if runner != nil && runner.Status == taskrunner.RunnerStatusRunning {
-						c.logger.Info("Changing task status to waiting",
+					// Task 상태를 waiting으로 업데이트
+					if err := c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusWaiting); err != nil {
+						c.logger.Error("Failed to update task status to waiting",
 							zap.String("task_id", taskID),
-							zap.String("runner_status", runner.Status),
+							zap.Error(err),
 						)
-						// Task 상태를 waiting으로 업데이트
-						if err := c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusWaiting); err != nil {
-							c.logger.Error("Failed to update task status to waiting",
-								zap.String("task_id", taskID),
-								zap.Error(err),
-							)
-						}
+					} else {
+						// 상태 업데이트 이벤트 전송
+						c.sendStatusUpdateEvent(taskID, storage.TaskStatusWaiting)
 					}
 				}
 			}
@@ -229,7 +234,12 @@ func (c *Controller) OnComplete(taskID string, result *taskrunner.RunResult) err
 	}
 
 	// 상태를 completed로 변경
-	return c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusCompleted)
+	err := c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusCompleted)
+	if err == nil {
+		// 상태 업데이트 이벤트 전송
+		c.sendStatusUpdateEvent(taskID, storage.TaskStatusCompleted)
+	}
+	return err
 }
 
 // OnError는 Task 실행 중 에러가 발생할 때 호출됩니다.
@@ -246,7 +256,12 @@ func (c *Controller) OnError(taskID string, err error) error {
 	}
 
 	// 상태를 failed로 변경
-	return c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusFailed)
+	updateErr := c.UpdateTaskStatus(context.Background(), taskID, storage.TaskStatusFailed)
+	if updateErr == nil {
+		// 상태 업데이트 이벤트 전송
+		c.sendStatusUpdateEvent(taskID, storage.TaskStatusFailed)
+	}
+	return updateErr
 }
 
 // fetchMessageRole은 메시지 ID로부터 role 정보를 가져와 이벤트에 설정합니다.

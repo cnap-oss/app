@@ -50,6 +50,9 @@ const (
 	// EventTypeMessageComplete - 메시지 완료
 	EventTypeMessageComplete ControllerEventType = "message_complete"
 
+	// EventTypeStatusUpdate - Task 상태 업데이트
+	EventTypeStatusUpdate ControllerEventType = "status_update"
+
 	// EventTypeError - 일반 에러
 	EventTypeError ControllerEventType = "error"
 

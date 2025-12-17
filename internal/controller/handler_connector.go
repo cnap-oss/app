@@ -173,6 +173,13 @@ func (c *Controller) handleCompleteEvent(ctx context.Context, event ConnectorEve
 			Error:  fmt.Errorf("failed to update status: %w", err),
 		}
 		return
+	} else {
+		// 상태 업데이트 이벤트 전송
+		c.controllerEventChan <- ControllerEvent{
+			EventType: EventTypeStatusUpdate,
+			TaskID:    taskID,
+			Status:    storage.TaskStatusCompleted,
+		}
 	}
 
 	// 3. Runner 삭제 (명시적 완료 시에만)

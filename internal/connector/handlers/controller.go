@@ -12,18 +12,21 @@ import (
 
 // ControllerHandler는 Controller로부터의 이벤트를 처리합니다.
 type ControllerHandler struct {
-	logger            *zap.Logger
-	session           *discordgo.Session
-	toolMessagesMutex sync.RWMutex
-	toolMessages      map[string]string // key: taskID:callID, value: Discord messageID
+	logger               *zap.Logger
+	session              *discordgo.Session
+	toolMessagesMutex    sync.RWMutex
+	toolMessages         map[string]string // key: taskID:callID, value: Discord messageID
+	threadMainMsgMutex   sync.RWMutex
+	threadMainMessages   map[string]string // key: taskID (threadID), value: main message ID
 }
 
 // NewControllerHandler는 새로운 ControllerHandler를 생성합니다.
 func NewControllerHandler(logger *zap.Logger, session *discordgo.Session) *ControllerHandler {
 	return &ControllerHandler{
-		logger:       logger.With(zap.String("handler", "controller")),
-		session:      session,
-		toolMessages: make(map[string]string),
+		logger:             logger.With(zap.String("handler", "controller")),
+		session:            session,
+		toolMessages:       make(map[string]string),
+		threadMainMessages: make(map[string]string),
 	}
 }
 
@@ -62,6 +65,8 @@ func (h *ControllerHandler) handleControllerEvent(event controller.ControllerEve
 		h.handleToolError(event)
 	case controller.EventTypeMessageComplete:
 		h.handleMessageComplete(event)
+	case controller.EventTypeStatusUpdate:
+		h.handleStatusUpdate(event)
 
 	case controller.EventTypeError:
 		h.handleError(event)
@@ -283,6 +288,15 @@ func (h *ControllerHandler) handleToolError(event controller.ControllerEvent) {
 		delete(h.toolMessages, messageKey)
 		h.toolMessagesMutex.Unlock()
 	}
+}
+
+// handleStatusUpdate는 Task 상태 업데이트를 처리합니다.
+func (h *ControllerHandler) handleStatusUpdate(event controller.ControllerEvent) {
+	h.logger.Info("[StatusUpdate]",
+		zap.String("task_id", event.TaskID),
+		zap.String("status", event.Status),
+	)
+	h.updateThreadMainMessage(event.TaskID, event.Status)
 }
 
 // handleMessageComplete는 메시지 완료를 처리합니다.
@@ -544,4 +558,94 @@ func formatToolMessage(toolName, status, output string, input map[string]any) st
 	}
 
 	return message
+}
+
+// RegisterThreadMainMessage는 Thread의 메인 메시지 ID를 등록합니다.
+func (h *ControllerHandler) RegisterThreadMainMessage(taskID, messageID string) {
+	h.threadMainMsgMutex.Lock()
+	defer h.threadMainMsgMutex.Unlock()
+	h.threadMainMessages[taskID] = messageID
+	
+	h.logger.Debug("Thread main message registered",
+		zap.String("task_id", taskID),
+		zap.String("message_id", messageID),
+	)
+}
+
+// updateThreadMainMessage는 Thread 메인 메시지를 Task 상태에 따라 업데이트합니다.
+func (h *ControllerHandler) updateThreadMainMessage(taskID, status string) {
+	h.threadMainMsgMutex.RLock()
+	messageID, exists := h.threadMainMessages[taskID]
+	h.threadMainMsgMutex.RUnlock()
+
+	if !exists {
+		h.logger.Warn("Thread main message not found",
+			zap.String("task_id", taskID),
+		)
+		return
+	}
+
+	// 상태에 따라 Embed 생성
+	var embed *discordgo.MessageEmbed
+	
+	switch status {
+	case "pending":
+		embed = &discordgo.MessageEmbed{
+			Title: "⏳ 대기 중",
+			Color: 0xFFFF00, // 노란색
+			Description: "작업이 시작을 기다리고 있습니다.",
+		}
+	case "running":
+		embed = &discordgo.MessageEmbed{
+			Title: "🔄 실행 중",
+			Color: 0x0099FF, // 파란색
+			Description: "작업을 실행하고 있습니다...",
+		}
+	case "waiting":
+		embed = &discordgo.MessageEmbed{
+			Title: "⏸️ 입력 대기 중",
+			Color: 0xFFA500, // 주황색
+			Description: "사용자 입력을 기다리고 있습니다.",
+		}
+	case "completed":
+		embed = &discordgo.MessageEmbed{
+			Title: "✅ 완료",
+			Color: 0x00FF00, // 초록색
+			Description: "작업이 성공적으로 완료되었습니다.",
+		}
+	case "failed":
+		embed = &discordgo.MessageEmbed{
+			Title: "❌ 실패",
+			Color: 0xFF0000, // 빨간색
+			Description: "작업 실행에 실패했습니다.",
+		}
+	case "canceled":
+		embed = &discordgo.MessageEmbed{
+			Title: "🚫 취소됨",
+			Color: 0x808080, // 회색
+			Description: "작업이 취소되었습니다.",
+		}
+	default:
+		h.logger.Warn("Unknown task status",
+			zap.String("task_id", taskID),
+			zap.String("status", status),
+		)
+		return
+	}
+
+	// 메시지 업데이트
+	_, err := h.session.ChannelMessageEditEmbed(taskID, messageID, embed)
+	if err != nil {
+		h.logger.Error("Failed to update thread main message",
+			zap.String("task_id", taskID),
+			zap.String("message_id", messageID),
+			zap.String("status", status),
+			zap.Error(err),
+		)
+	} else {
+		h.logger.Info("Thread main message updated",
+			zap.String("task_id", taskID),
+			zap.String("status", status),
+		)
+	}
 }

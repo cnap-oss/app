@@ -64,6 +64,9 @@ func (s *Connector) Start(ctx context.Context) error {
 	// 핸들러 초기화
 	s.discordHandler = handlers.NewDiscordHandler(s.logger, s.session, s.controller, s.connectorEventChan)
 	s.controllerHandler = handlers.NewControllerHandler(s.logger, s.session)
+	
+	// DiscordHandler에 ControllerHandler 연결
+	s.discordHandler.SetControllerHandler(s.controllerHandler)
 
 	// Discord 이벤트 핸들러 등록
 	s.discordHandler.RegisterHandlers()

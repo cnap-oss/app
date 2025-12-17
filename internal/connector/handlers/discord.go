@@ -31,6 +31,7 @@ type DiscordHandler struct {
 	session            *discordgo.Session
 	controller         *controller.Controller
 	connectorEventChan chan controller.ConnectorEvent
+	controllerHandler  *ControllerHandler
 	threadsMutex       sync.RWMutex
 	activeThreads      map[string]string
 }
@@ -49,6 +50,11 @@ func NewDiscordHandler(
 		connectorEventChan: eventChan,
 		activeThreads:      make(map[string]string),
 	}
+}
+
+// SetControllerHandler는 ControllerHandler를 설정합니다.
+func (h *DiscordHandler) SetControllerHandler(handler *ControllerHandler) {
+	h.controllerHandler = handler
 }
 
 // RegisterHandlers는 Discord 세션에 이벤트 핸들러를 등록합니다.
@@ -317,14 +323,19 @@ func (h *DiscordHandler) startAgentThread(i *discordgo.InteractionCreate, agentN
 	embed := &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("'%s'와의 대화 시작", agent.Name),
 		Description: "이 스레드에 메시지를 입력하여 대화를 시작하세요.",
-		Color:       0x33cc33, // Green
+		Color:       0x0099FF, // Blue
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "에이전트 모델", Value: agent.Model, Inline: true},
+			{Name: "상태", Value: "⏳ 대기 중", Inline: true},
 			{Name: "역할 정의 (프롬프트)", Value: fmt.Sprintf("```\n%s\n```", agent.Prompt), Inline: false},
 		},
 	}
-	if _, err := h.session.ChannelMessageSendEmbed(thread.ID, embed); err != nil {
+	msg, err := h.session.ChannelMessageSendEmbed(thread.ID, embed)
+	if err != nil {
 		h.logger.Error("Failed to send initial thread message", zap.Error(err), zap.String("thread_id", thread.ID))
+	} else if h.controllerHandler != nil {
+		// Thread 메인 메시지 ID를 ControllerHandler에 등록
+		h.controllerHandler.RegisterThreadMainMessage(thread.ID, msg.ID)
 	}
 }
 
