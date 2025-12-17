@@ -73,7 +73,7 @@ func main() {
 
 // initLogger는 zap logger를 초기화합니다.
 func initLogger() (*zap.Logger, error) {
-	return common.NewLogger("")
+	return common.NewLogger("main")
 }
 
 // runStart는 controller와 connector 서버를 시작합니다.
@@ -103,8 +103,8 @@ func runStart(logger *zap.Logger) error {
 	controllerEventChan := make(chan controller.ControllerEvent, 100)
 
 	// 서버 인스턴스 생성
-	controllerServer := controller.NewController(logger.Named("controller"), repo, connectorEventChan, controllerEventChan)
-	connectorServer := connector.NewServer(logger.Named("connector"), controllerServer, connectorEventChan, controllerEventChan)
+	controllerServer := controller.NewController(logger, repo, connectorEventChan, controllerEventChan)
+	connectorServer := connector.NewServer(logger, controllerServer, connectorEventChan, controllerEventChan)
 
 	// 에러 채널
 	errChan := make(chan error, 2)

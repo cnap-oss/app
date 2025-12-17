@@ -1,57 +1,75 @@
-package connector
+package handlers
 
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/cnap-oss/app/internal/controller"
 	"go.uber.org/zap"
 )
 
-// controllerEventHandler는 Task 실행 결과를 처리하는 goroutine입니다.
-func (s *Server) controllerEventHandler(ctx context.Context) {
-	s.logger.Info("Result handler started")
-	defer s.logger.Info("Result handler stopped")
+// ControllerHandler는 Controller로부터의 이벤트를 처리합니다.
+type ControllerHandler struct {
+	logger            *zap.Logger
+	session           *discordgo.Session
+	toolMessagesMutex sync.RWMutex
+	toolMessages      map[string]string // key: taskID:callID, value: Discord messageID
+}
+
+// NewControllerHandler는 새로운 ControllerHandler를 생성합니다.
+func NewControllerHandler(logger *zap.Logger, session *discordgo.Session) *ControllerHandler {
+	return &ControllerHandler{
+		logger:       logger.With(zap.String("handler", "controller")),
+		session:      session,
+		toolMessages: make(map[string]string),
+	}
+}
+
+// Start는 Controller 이벤트를 처리하는 goroutine을 시작합니다.
+func (h *ControllerHandler) Start(ctx context.Context, eventChan <-chan controller.ControllerEvent) {
+	h.logger.Info("Controller event handler started")
+	defer h.logger.Info("Controller event handler stopped")
 
 	for {
 		select {
-		case event := <-s.controllerEventChan:
-			s.handleControllerEvent(event)
+		case event := <-eventChan:
+			h.handleControllerEvent(event)
 
 		case <-ctx.Done():
-			s.logger.Info("Result handler shutting down")
+			h.logger.Info("Controller event handler shutting down")
 			return
 		}
 	}
 }
 
 // handleControllerEvent는 ControllerEvent를 EventType에 따라 분기 처리합니다.
-func (s *Server) handleControllerEvent(event controller.ControllerEvent) {
+func (h *ControllerHandler) handleControllerEvent(event controller.ControllerEvent) {
 	// 새로운 EventType 기반 처리
 	switch event.EventType {
 	case controller.EventTypeStreamDelta:
-		s.handleStreamDelta(event)
+		h.handleStreamDelta(event)
 	case controller.EventTypePartComplete:
-		s.handlePartComplete(event)
+		h.handlePartComplete(event)
 	case controller.EventTypeToolStart:
-		s.handleToolStart(event)
+		h.handleToolStart(event)
 	case controller.EventTypeToolProgress:
-		s.handleToolProgress(event)
+		h.handleToolProgress(event)
 	case controller.EventTypeToolComplete:
-		s.handleToolComplete(event)
+		h.handleToolComplete(event)
 	case controller.EventTypeToolError:
-		s.handleToolError(event)
+		h.handleToolError(event)
 	case controller.EventTypeMessageComplete:
-		s.handleMessageComplete(event)
+		h.handleMessageComplete(event)
 
 	case controller.EventTypeError:
-		s.handleError(event)
+		h.handleError(event)
 	case controller.EventTypeLegacy, "":
 		// 하위 호환: Status 필드 기반 처리
-		s.handleLegacyEvent(event)
+		h.handleLegacyEvent(event)
 	default:
-		s.logger.Warn("Unknown EventType",
+		h.logger.Warn("Unknown EventType",
 			zap.String("task_id", event.TaskID),
 			zap.String("event_type", string(event.EventType)),
 		)
@@ -59,8 +77,8 @@ func (s *Server) handleControllerEvent(event controller.ControllerEvent) {
 }
 
 // handleStreamDelta는 스트리밍 델타 텍스트를 처리합니다.
-func (s *Server) handleStreamDelta(event controller.ControllerEvent) {
-	s.logger.Debug("[StreamDelta]",
+func (h *ControllerHandler) handleStreamDelta(event controller.ControllerEvent) {
+	h.logger.Debug("[StreamDelta]",
 		zap.String("task_id", event.TaskID),
 		zap.String("message_id", event.MessageID),
 		zap.String("part_id", event.PartID),
@@ -70,8 +88,8 @@ func (s *Server) handleStreamDelta(event controller.ControllerEvent) {
 }
 
 // handlePartComplete는 완료된 Part를 처리합니다.
-func (s *Server) handlePartComplete(event controller.ControllerEvent) {
-	s.logger.Info("[PartComplete]",
+func (h *ControllerHandler) handlePartComplete(event controller.ControllerEvent) {
+	h.logger.Info("[PartComplete]",
 		zap.String("task_id", event.TaskID),
 		zap.String("message_id", event.MessageID),
 		zap.String("part_id", event.PartID),
@@ -80,15 +98,15 @@ func (s *Server) handlePartComplete(event controller.ControllerEvent) {
 		zap.String("content", truncate(event.Content, 100)),
 	)
 	if event.PartType == controller.PartTypeText && event.Role == "assistant" {
-		s.sendMessageToDiscord(event)
+		h.sendMessageToDiscord(event)
 	}
 	// TODO: Discord 메시지 업데이트
 }
 
 // handleToolStart는 도구 시작을 처리합니다.
-func (s *Server) handleToolStart(event controller.ControllerEvent) {
+func (h *ControllerHandler) handleToolStart(event controller.ControllerEvent) {
 	if event.ToolInfo != nil {
-		s.logger.Info("[ToolStart]",
+		h.logger.Info("[ToolStart]",
 			zap.String("task_id", event.TaskID),
 			zap.String("tool_name", event.ToolInfo.ToolName),
 			zap.String("call_id", event.ToolInfo.CallID),
@@ -98,9 +116,9 @@ func (s *Server) handleToolStart(event controller.ControllerEvent) {
 		content := formatToolMessage(event.ToolInfo.ToolName, "running", "", event.ToolInfo.Input)
 
 		// Discord 메시지 전송
-		msg, err := s.session.ChannelMessageSend(event.TaskID, content)
+		msg, err := h.session.ChannelMessageSend(event.TaskID, content)
 		if err != nil {
-			s.logger.Error("Failed to send tool start message",
+			h.logger.Error("Failed to send tool start message",
 				zap.String("task_id", event.TaskID),
 				zap.String("tool_name", event.ToolInfo.ToolName),
 				zap.Error(err),
@@ -110,11 +128,11 @@ func (s *Server) handleToolStart(event controller.ControllerEvent) {
 
 		// 메시지 ID 저장 (나중에 업데이트하기 위해)
 		messageKey := event.TaskID + ":" + event.ToolInfo.CallID
-		s.toolMessagesMutex.Lock()
-		s.toolMessages[messageKey] = msg.ID
-		s.toolMessagesMutex.Unlock()
+		h.toolMessagesMutex.Lock()
+		h.toolMessages[messageKey] = msg.ID
+		h.toolMessagesMutex.Unlock()
 
-		s.logger.Debug("Tool start message sent",
+		h.logger.Debug("Tool start message sent",
 			zap.String("task_id", event.TaskID),
 			zap.String("message_id", msg.ID),
 		)
@@ -122,9 +140,9 @@ func (s *Server) handleToolStart(event controller.ControllerEvent) {
 }
 
 // handleToolProgress는 도구 진행 상태를 처리합니다.
-func (s *Server) handleToolProgress(event controller.ControllerEvent) {
+func (h *ControllerHandler) handleToolProgress(event controller.ControllerEvent) {
 	if event.ToolInfo != nil {
-		s.logger.Debug("[ToolProgress]",
+		h.logger.Debug("[ToolProgress]",
 			zap.String("task_id", event.TaskID),
 			zap.String("tool_name", event.ToolInfo.ToolName),
 			zap.String("call_id", event.ToolInfo.CallID),
@@ -132,12 +150,12 @@ func (s *Server) handleToolProgress(event controller.ControllerEvent) {
 
 		// 저장된 메시지 ID 가져오기
 		messageKey := event.TaskID + ":" + event.ToolInfo.CallID
-		s.toolMessagesMutex.RLock()
-		messageID, exists := s.toolMessages[messageKey]
-		s.toolMessagesMutex.RUnlock()
+		h.toolMessagesMutex.RLock()
+		messageID, exists := h.toolMessages[messageKey]
+		h.toolMessagesMutex.RUnlock()
 
 		if !exists {
-			s.logger.Warn("Tool message not found for progress update",
+			h.logger.Warn("Tool message not found for progress update",
 				zap.String("task_id", event.TaskID),
 				zap.String("call_id", event.ToolInfo.CallID),
 			)
@@ -147,9 +165,9 @@ func (s *Server) handleToolProgress(event controller.ControllerEvent) {
 		// Progress 상태로 메시지 업데이트
 		content := formatToolMessage(event.ToolInfo.ToolName, "running", "", event.ToolInfo.Input)
 
-		_, err := s.session.ChannelMessageEdit(event.TaskID, messageID, content)
+		_, err := h.session.ChannelMessageEdit(event.TaskID, messageID, content)
 		if err != nil {
-			s.logger.Error("Failed to update tool progress message",
+			h.logger.Error("Failed to update tool progress message",
 				zap.String("task_id", event.TaskID),
 				zap.String("tool_name", event.ToolInfo.ToolName),
 				zap.Error(err),
@@ -159,9 +177,9 @@ func (s *Server) handleToolProgress(event controller.ControllerEvent) {
 }
 
 // handleToolComplete는 도구 완료를 처리합니다.
-func (s *Server) handleToolComplete(event controller.ControllerEvent) {
+func (h *ControllerHandler) handleToolComplete(event controller.ControllerEvent) {
 	if event.ToolInfo != nil {
-		s.logger.Info("[ToolComplete]",
+		h.logger.Info("[ToolComplete]",
 			zap.String("task_id", event.TaskID),
 			zap.String("tool_name", event.ToolInfo.ToolName),
 			zap.String("call_id", event.ToolInfo.CallID),
@@ -170,12 +188,12 @@ func (s *Server) handleToolComplete(event controller.ControllerEvent) {
 
 		// 저장된 메시지 ID 가져오기
 		messageKey := event.TaskID + ":" + event.ToolInfo.CallID
-		s.toolMessagesMutex.RLock()
-		messageID, exists := s.toolMessages[messageKey]
-		s.toolMessagesMutex.RUnlock()
+		h.toolMessagesMutex.RLock()
+		messageID, exists := h.toolMessages[messageKey]
+		h.toolMessagesMutex.RUnlock()
 
 		if !exists {
-			s.logger.Warn("Tool message not found for complete update",
+			h.logger.Warn("Tool message not found for complete update",
 				zap.String("task_id", event.TaskID),
 				zap.String("call_id", event.ToolInfo.CallID),
 			)
@@ -185,9 +203,9 @@ func (s *Server) handleToolComplete(event controller.ControllerEvent) {
 		// Complete 상태로 메시지 업데이트
 		content := formatToolMessage(event.ToolInfo.ToolName, "completed", event.ToolInfo.Output, event.ToolInfo.Input)
 
-		_, err := s.session.ChannelMessageEdit(event.TaskID, messageID, content)
+		_, err := h.session.ChannelMessageEdit(event.TaskID, messageID, content)
 		if err != nil {
-			s.logger.Error("Failed to update tool complete message",
+			h.logger.Error("Failed to update tool complete message",
 				zap.String("task_id", event.TaskID),
 				zap.String("tool_name", event.ToolInfo.ToolName),
 				zap.Error(err),
@@ -195,16 +213,16 @@ func (s *Server) handleToolComplete(event controller.ControllerEvent) {
 		}
 
 		// 메시지 ID 정리
-		s.toolMessagesMutex.Lock()
-		delete(s.toolMessages, messageKey)
-		s.toolMessagesMutex.Unlock()
+		h.toolMessagesMutex.Lock()
+		delete(h.toolMessages, messageKey)
+		h.toolMessagesMutex.Unlock()
 	}
 }
 
 // handleToolError는 도구 에러를 처리합니다.
-func (s *Server) handleToolError(event controller.ControllerEvent) {
+func (h *ControllerHandler) handleToolError(event controller.ControllerEvent) {
 	if event.ToolInfo != nil {
-		s.logger.Error("[ToolError]",
+		h.logger.Error("[ToolError]",
 			zap.String("task_id", event.TaskID),
 			zap.String("tool_name", event.ToolInfo.ToolName),
 			zap.String("call_id", event.ToolInfo.CallID),
@@ -213,12 +231,12 @@ func (s *Server) handleToolError(event controller.ControllerEvent) {
 
 		// 저장된 메시지 ID 가져오기
 		messageKey := event.TaskID + ":" + event.ToolInfo.CallID
-		s.toolMessagesMutex.RLock()
-		messageID, exists := s.toolMessages[messageKey]
-		s.toolMessagesMutex.RUnlock()
+		h.toolMessagesMutex.RLock()
+		messageID, exists := h.toolMessages[messageKey]
+		h.toolMessagesMutex.RUnlock()
 
 		if !exists {
-			s.logger.Warn("Tool message not found for error update",
+			h.logger.Warn("Tool message not found for error update",
 				zap.String("task_id", event.TaskID),
 				zap.String("call_id", event.ToolInfo.CallID),
 			)
@@ -228,9 +246,9 @@ func (s *Server) handleToolError(event controller.ControllerEvent) {
 		// Error 상태로 메시지 업데이트
 		content := formatToolMessage(event.ToolInfo.ToolName, "error", event.ToolInfo.Error, event.ToolInfo.Input)
 
-		_, err := s.session.ChannelMessageEdit(event.TaskID, messageID, content)
+		_, err := h.session.ChannelMessageEdit(event.TaskID, messageID, content)
 		if err != nil {
-			s.logger.Error("Failed to update tool error message",
+			h.logger.Error("Failed to update tool error message",
 				zap.String("task_id", event.TaskID),
 				zap.String("tool_name", event.ToolInfo.ToolName),
 				zap.Error(err),
@@ -238,36 +256,36 @@ func (s *Server) handleToolError(event controller.ControllerEvent) {
 		}
 
 		// 메시지 ID 정리
-		s.toolMessagesMutex.Lock()
-		delete(s.toolMessages, messageKey)
-		s.toolMessagesMutex.Unlock()
+		h.toolMessagesMutex.Lock()
+		delete(h.toolMessages, messageKey)
+		h.toolMessagesMutex.Unlock()
 	}
 }
 
 // handleMessageComplete는 메시지 완료를 처리합니다.
-func (s *Server) handleMessageComplete(event controller.ControllerEvent) {
-	s.logger.Info("[MessageComplete]",
+func (h *ControllerHandler) handleMessageComplete(event controller.ControllerEvent) {
+	h.logger.Info("[MessageComplete]",
 		zap.String("task_id", event.TaskID),
 		zap.String("message_id", event.MessageID),
 		zap.String("content", truncate(event.Content, 200)),
 	)
 	// 기존 메시지 전송 로직 재사용
-	// s.sendMessageToDiscord(event)
+	// h.sendMessageToDiscord(event)
 }
 
 // handleError는 에러 이벤트를 처리합니다.
-func (s *Server) handleError(event controller.ControllerEvent) {
-	s.logger.Error("[Error]",
+func (h *ControllerHandler) handleError(event controller.ControllerEvent) {
+	h.logger.Error("[Error]",
 		zap.String("task_id", event.TaskID),
 		zap.Error(event.Error),
 	)
 	// 기존 결과 전송 로직 재사용
-	s.sendResultToDiscord(event)
+	h.sendResultToDiscord(event)
 }
 
 // handleLegacyEvent는 기존 Status 필드 기반 이벤트를 처리합니다 (하위 호환).
-func (s *Server) handleLegacyEvent(event controller.ControllerEvent) {
-	s.logger.Info("Received controller event (legacy)",
+func (h *ControllerHandler) handleLegacyEvent(event controller.ControllerEvent) {
+	h.logger.Info("Received controller event (legacy)",
 		zap.String("task_id", event.TaskID),
 		zap.String("status", event.Status),
 		zap.String("content", truncate(event.Content, 100)),
@@ -275,9 +293,9 @@ func (s *Server) handleLegacyEvent(event controller.ControllerEvent) {
 
 	switch event.Status {
 	case "completed", "failed", "canceled":
-		s.sendResultToDiscord(event)
+		h.sendResultToDiscord(event)
 	default:
-		s.logger.Warn("Unknown controller event status",
+		h.logger.Warn("Unknown controller event status",
 			zap.String("task_id", event.TaskID),
 			zap.String("status", event.Status),
 		)
@@ -292,9 +310,9 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-func (s *Server) sendMessageToDiscord(result controller.ControllerEvent) {
+func (h *ControllerHandler) sendMessageToDiscord(result controller.ControllerEvent) {
 	if result.TaskID == "" {
-		s.logger.Warn("Task ID is empty, cannot send result",
+		h.logger.Warn("Task ID is empty, cannot send result",
 			zap.String("task_id", result.TaskID),
 		)
 		return
@@ -305,14 +323,14 @@ func (s *Server) sendMessageToDiscord(result controller.ControllerEvent) {
 
 	// content가 2000자 이하면 그대로 전송
 	if len(content) <= maxLength {
-		_, err := s.session.ChannelMessageSend(result.TaskID, content)
+		_, err := h.session.ChannelMessageSend(result.TaskID, content)
 		if err != nil {
-			s.logger.Error("Failed to send message to Discord",
+			h.logger.Error("Failed to send message to Discord",
 				zap.String("task_id", result.TaskID),
 				zap.Error(err),
 			)
 		} else {
-			s.logger.Debug("Message sent to Discord",
+			h.logger.Debug("Message sent to Discord",
 				zap.String("task_id", result.TaskID),
 			)
 		}
@@ -320,7 +338,7 @@ func (s *Server) sendMessageToDiscord(result controller.ControllerEvent) {
 	}
 
 	// content가 2000자를 초과하면 여러 메시지로 분할 전송
-	s.logger.Info("Splitting long message",
+	h.logger.Info("Splitting long message",
 		zap.String("task_id", result.TaskID),
 		zap.Int("total_length", len(content)),
 		zap.Int("chunks", (len(content)+maxLength-1)/maxLength),
@@ -333,9 +351,9 @@ func (s *Server) sendMessageToDiscord(result controller.ControllerEvent) {
 		}
 
 		chunk := content[i:end]
-		_, err := s.session.ChannelMessageSend(result.TaskID, chunk)
+		_, err := h.session.ChannelMessageSend(result.TaskID, chunk)
 		if err != nil {
-			s.logger.Error("Failed to send message chunk to Discord",
+			h.logger.Error("Failed to send message chunk to Discord",
 				zap.String("task_id", result.TaskID),
 				zap.Int("chunk_index", i/maxLength),
 				zap.Error(err),
@@ -343,22 +361,22 @@ func (s *Server) sendMessageToDiscord(result controller.ControllerEvent) {
 			return
 		}
 
-		s.logger.Debug("Message chunk sent to Discord",
+		h.logger.Debug("Message chunk sent to Discord",
 			zap.String("task_id", result.TaskID),
 			zap.Int("chunk_index", i/maxLength),
 			zap.Int("chunk_length", len(chunk)),
 		)
 	}
 
-	s.logger.Info("All message chunks sent successfully",
+	h.logger.Info("All message chunks sent successfully",
 		zap.String("task_id", result.TaskID),
 	)
 }
 
 // sendResultToDiscord는 Task 실행 결과를 Discord Thread에 전송합니다.
-func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
+func (h *ControllerHandler) sendResultToDiscord(result controller.ControllerEvent) {
 	if result.TaskID == "" {
-		s.logger.Warn("Task ID is empty, cannot send result",
+		h.logger.Warn("Task ID is empty, cannot send result",
 			zap.String("task_id", result.TaskID),
 		)
 		return
@@ -423,13 +441,13 @@ func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 		}
 	} else {
 		// 알 수 없는 상태 - 기본 메시지로 처리
-		s.logger.Warn("Unknown status received",
+		h.logger.Warn("Unknown status received",
 			zap.String("task_id", result.TaskID),
 			zap.String("status", result.Status),
 		)
-		_, err := s.session.ChannelMessageSend(result.TaskID, result.Content)
+		_, err := h.session.ChannelMessageSend(result.TaskID, result.Content)
 		if err != nil {
-			s.logger.Error("Failed to send message to Discord",
+			h.logger.Error("Failed to send message to Discord",
 				zap.String("task_id", result.TaskID),
 				zap.Error(err),
 			)
@@ -438,14 +456,14 @@ func (s *Server) sendResultToDiscord(result controller.ControllerEvent) {
 	}
 
 	// Discord에 메시지 전송
-	_, err := s.session.ChannelMessageSendEmbed(result.TaskID, embed)
+	_, err := h.session.ChannelMessageSendEmbed(result.TaskID, embed)
 	if err != nil {
-		s.logger.Error("Failed to send result to Discord",
+		h.logger.Error("Failed to send result to Discord",
 			zap.String("task_id", result.TaskID),
 			zap.Error(err),
 		)
 	} else {
-		s.logger.Info("Result sent to Discord",
+		h.logger.Info("Result sent to Discord",
 			zap.String("task_id", result.TaskID),
 		)
 	}
