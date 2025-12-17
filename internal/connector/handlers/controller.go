@@ -115,27 +115,50 @@ func (h *ControllerHandler) handleToolStart(event controller.ControllerEvent) {
 		// 도구 실행 시작 메시지 생성
 		content := formatToolMessage(event.ToolInfo.ToolName, "running", "", event.ToolInfo.Input)
 
-		// Discord 메시지 전송
-		msg, err := h.session.ChannelMessageSend(event.TaskID, content)
-		if err != nil {
-			h.logger.Error("Failed to send tool start message",
-				zap.String("task_id", event.TaskID),
-				zap.String("tool_name", event.ToolInfo.ToolName),
-				zap.Error(err),
-			)
-			return
-		}
-
-		// 메시지 ID 저장 (나중에 업데이트하기 위해)
+		// 저장된 메시지 ID 확인
 		messageKey := event.TaskID + ":" + event.ToolInfo.CallID
-		h.toolMessagesMutex.Lock()
-		h.toolMessages[messageKey] = msg.ID
-		h.toolMessagesMutex.Unlock()
+		h.toolMessagesMutex.RLock()
+		messageID, exists := h.toolMessages[messageKey]
+		h.toolMessagesMutex.RUnlock()
 
-		h.logger.Debug("Tool start message sent",
-			zap.String("task_id", event.TaskID),
-			zap.String("message_id", msg.ID),
-		)
+		if exists {
+			// 기존 메시지가 있으면 업데이트
+			_, err := h.session.ChannelMessageEdit(event.TaskID, messageID, content)
+			if err != nil {
+				h.logger.Error("Failed to update existing tool start message",
+					zap.String("task_id", event.TaskID),
+					zap.String("tool_name", event.ToolInfo.ToolName),
+					zap.String("message_id", messageID),
+					zap.Error(err),
+				)
+			} else {
+				h.logger.Debug("Tool start message updated",
+					zap.String("task_id", event.TaskID),
+					zap.String("message_id", messageID),
+				)
+			}
+		} else {
+			// 기존 메시지가 없으면 새로 생성
+			msg, err := h.session.ChannelMessageSend(event.TaskID, content)
+			if err != nil {
+				h.logger.Error("Failed to send tool start message",
+					zap.String("task_id", event.TaskID),
+					zap.String("tool_name", event.ToolInfo.ToolName),
+					zap.Error(err),
+				)
+				return
+			}
+
+			// 메시지 ID 저장 (나중에 업데이트하기 위해)
+			h.toolMessagesMutex.Lock()
+			h.toolMessages[messageKey] = msg.ID
+			h.toolMessagesMutex.Unlock()
+
+			h.logger.Debug("Tool start message created",
+				zap.String("task_id", event.TaskID),
+				zap.String("message_id", msg.ID),
+			)
+		}
 	}
 }
 
