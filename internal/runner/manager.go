@@ -6,13 +6,14 @@ import (
 	"sync"
 
 	"github.com/cnap-oss/app/internal/common"
+	"github.com/cnap-oss/app/internal/runner/docker"
 	"go.uber.org/zap"
 )
 
 // RunnerManager manages Runner instances.
 type RunnerManager struct {
 	runners          map[string]*Runner
-	dockerClient     DockerClient
+	dockerClient     docker.Client
 	lifecycleManager LifecycleManager
 	mu               sync.RWMutex
 	logger           *zap.Logger
@@ -22,7 +23,7 @@ type RunnerManager struct {
 type RunnerManagerOption func(*RunnerManager)
 
 // WithDockerClientOption은 DockerClient를 주입합니다.
-func WithDockerClientOption(client DockerClient) RunnerManagerOption {
+func WithDockerClientOption(client docker.Client) RunnerManagerOption {
 	return func(rm *RunnerManager) {
 		rm.dockerClient = client
 	}
@@ -64,7 +65,7 @@ func GetRunnerManager(opts ...RunnerManagerOption) *RunnerManager {
 
 		// DockerClient가 설정되지 않았으면 새로 생성
 		if instance.dockerClient == nil {
-			client, err := NewDockerClient()
+			client, err := docker.NewClient()
 			if err != nil {
 				instance.logger.Fatal("Docker client 생성 실패", zap.Error(err))
 			}

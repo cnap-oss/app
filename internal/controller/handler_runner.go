@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	taskrunner "github.com/cnap-oss/app/internal/runner"
+	"github.com/cnap-oss/app/internal/runner/opencode"
 	"github.com/cnap-oss/app/internal/storage"
 	"go.uber.org/zap"
 )
@@ -24,7 +25,7 @@ func (c *Controller) OnStarted(taskID string, sessionID string) error {
 
 // OnEvent는 Runner가 SSE 이벤트를 수신할 때 호출됩니다.
 // 이를 통해 Connector에 실시간으로 메시지를 전달합니다.
-func (c *Controller) OnEvent(taskID string, evt *taskrunner.Event) error {
+func (c *Controller) OnEvent(taskID string, evt *opencode.Event) error {
 	c.logger.Debug("OnEvent callback",
 		zap.String("task_id", taskID),
 		zap.String("event_type", evt.Type),
@@ -275,9 +276,9 @@ func (c *Controller) fetchMessageRole(taskID string, messageID string, event *Co
 	// role 설정
 	if msgInfo != nil && msgInfo.Info != nil {
 		switch msg := msgInfo.Info.(type) {
-		case taskrunner.UserMessage:
+		case opencode.UserMessage:
 			event.Role = msg.Role
-		case taskrunner.AssistantMessage:
+		case opencode.AssistantMessage:
 			event.Role = msg.Role
 		default:
 			c.logger.Info("알 수 없는 메시지 타입",

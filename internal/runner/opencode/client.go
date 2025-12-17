@@ -1,4 +1,4 @@
-package taskrunner
+package opencode
 
 import (
 	"bufio"
@@ -14,41 +14,41 @@ import (
 	"go.uber.org/zap"
 )
 
-// OpenCodeClient는 OpenCode Server REST API 클라이언트입니다.
-type OpenCodeClient struct {
+// Client는 OpenCode Server REST API 클라이언트입니다.
+type Client struct {
 	baseURL    string
 	directory  string // OpenCode 작업 디렉토리
 	httpClient *http.Client
 	logger     *zap.Logger
 }
 
-// OpenCodeClientOption은 OpenCodeClient 옵션입니다.
-type OpenCodeClientOption func(*OpenCodeClient)
+// ClientOption은 Client 옵션입니다.
+type ClientOption func(*Client)
 
-// WithOpenCodeHTTPClient는 HTTP 클라이언트를 설정합니다.
-func WithOpenCodeHTTPClient(client *http.Client) OpenCodeClientOption {
-	return func(c *OpenCodeClient) {
+// WithHTTPClient는 HTTP 클라이언트를 설정합니다.
+func WithHTTPClient(client *http.Client) ClientOption {
+	return func(c *Client) {
 		c.httpClient = client
 	}
 }
 
-// WithOpenCodeLogger는 로거를 설정합니다.
-func WithOpenCodeLogger(logger *zap.Logger) OpenCodeClientOption {
-	return func(c *OpenCodeClient) {
+// WithLogger는 로거를 설정합니다.
+func WithLogger(logger *zap.Logger) ClientOption {
+	return func(c *Client) {
 		c.logger = logger
 	}
 }
 
-// WithOpenCodeDirectory는 OpenCode 작업 디렉토리를 설정합니다.
-func WithOpenCodeDirectory(directory string) OpenCodeClientOption {
-	return func(c *OpenCodeClient) {
+// WithDirectory는 OpenCode 작업 디렉토리를 설정합니다.
+func WithDirectory(directory string) ClientOption {
+	return func(c *Client) {
 		c.directory = directory
 	}
 }
 
-// NewOpenCodeClient는 새 OpenCode API 클라이언트를 생성합니다.
-func NewOpenCodeClient(baseURL string, opts ...OpenCodeClientOption) *OpenCodeClient {
-	c := &OpenCodeClient{
+// NewClient는 새 OpenCode API 클라이언트를 생성합니다.
+func NewClient(baseURL string, opts ...ClientOption) *Client {
+	c := &Client{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		httpClient: &http.Client{
 			Timeout: 300 * time.Second, // OpenCode는 긴 처리 시간이 필요할 수 있음
@@ -68,7 +68,7 @@ func NewOpenCodeClient(baseURL string, opts ...OpenCodeClientOption) *OpenCodeCl
 // ======================================
 
 // CreateSession은 새 세션을 생성합니다.
-func (c *OpenCodeClient) CreateSession(ctx context.Context, req *CreateSessionRequest) (*Session, error) {
+func (c *Client) CreateSession(ctx context.Context, req *CreateSessionRequest) (*Session, error) {
 	resp, err := c.doRequest(ctx, http.MethodPost, "/session", req)
 	if err != nil {
 		return nil, err
@@ -89,7 +89,7 @@ func (c *OpenCodeClient) CreateSession(ctx context.Context, req *CreateSessionRe
 }
 
 // GetSession은 세션 정보를 조회합니다.
-func (c *OpenCodeClient) GetSession(ctx context.Context, sessionID string) (*Session, error) {
+func (c *Client) GetSession(ctx context.Context, sessionID string) (*Session, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/session/"+sessionID, nil)
 	if err != nil {
 		return nil, err
@@ -105,7 +105,7 @@ func (c *OpenCodeClient) GetSession(ctx context.Context, sessionID string) (*Ses
 }
 
 // UpdateSession은 세션을 업데이트합니다.
-func (c *OpenCodeClient) UpdateSession(ctx context.Context, sessionID string, req *UpdateSessionRequest) (*Session, error) {
+func (c *Client) UpdateSession(ctx context.Context, sessionID string, req *UpdateSessionRequest) (*Session, error) {
 	resp, err := c.doRequest(ctx, http.MethodPatch, "/session/"+sessionID, req)
 	if err != nil {
 		return nil, err
@@ -121,7 +121,7 @@ func (c *OpenCodeClient) UpdateSession(ctx context.Context, sessionID string, re
 }
 
 // DeleteSession은 세션을 종료합니다.
-func (c *OpenCodeClient) DeleteSession(ctx context.Context, sessionID string) error {
+func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 	resp, err := c.doRequest(ctx, http.MethodDelete, "/session/"+sessionID, nil)
 	if err != nil {
 		return err
@@ -136,7 +136,7 @@ func (c *OpenCodeClient) DeleteSession(ctx context.Context, sessionID string) er
 }
 
 // ListSessions는 모든 세션 목록을 조회합니다.
-func (c *OpenCodeClient) ListSessions(ctx context.Context) ([]Session, error) {
+func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/session", nil)
 	if err != nil {
 		return nil, err
@@ -156,7 +156,7 @@ func (c *OpenCodeClient) ListSessions(ctx context.Context) ([]Session, error) {
 // ======================================
 
 // Message는 메시지를 전송하고 응답을 수신합니다.
-func (c *OpenCodeClient) Message(ctx context.Context, sessionID string, req *PromptRequest) (*PromptResponse, error) {
+func (c *Client) Message(ctx context.Context, sessionID string, req *PromptRequest) (*PromptResponse, error) {
 	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/session/%s/message", sessionID), req)
 	if err != nil {
 		return nil, err
@@ -210,7 +210,7 @@ func (c *OpenCodeClient) Message(ctx context.Context, sessionID string, req *Pro
 }
 
 // PromptAsync는 메시지를 비동기적으로 전송합니다.
-func (c *OpenCodeClient) PromptAsync(ctx context.Context, sessionID string, req *PromptRequest) error {
+func (c *Client) PromptAsync(ctx context.Context, sessionID string, req *PromptRequest) error {
 	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/session/%s/prompt_async", sessionID), req)
 	if err != nil {
 		// 204 No Content는 성공으로 간주
@@ -232,7 +232,7 @@ func (c *OpenCodeClient) PromptAsync(ctx context.Context, sessionID string, req 
 }
 
 // GetMessages는 세션의 모든 메시지를 조회합니다.
-func (c *OpenCodeClient) GetMessages(ctx context.Context, sessionID string, limit *int) ([]struct {
+func (c *Client) GetMessages(ctx context.Context, sessionID string, limit *int) ([]struct {
 	Info  Message `json:"info"`
 	Parts []Part  `json:"parts"`
 }, error) {
@@ -290,7 +290,7 @@ func (c *OpenCodeClient) GetMessages(ctx context.Context, sessionID string, limi
 }
 
 // GetMessage는 특정 메시지를 조회합니다.
-func (c *OpenCodeClient) GetMessage(ctx context.Context, sessionID, messageID string) (*struct {
+func (c *Client) GetMessage(ctx context.Context, sessionID, messageID string) (*struct {
 	Info  Message `json:"info"`
 	Parts []Part  `json:"parts"`
 }, error) {
@@ -341,7 +341,7 @@ func (c *OpenCodeClient) GetMessage(ctx context.Context, sessionID, messageID st
 }
 
 // AbortSession은 활성 세션을 중단합니다.
-func (c *OpenCodeClient) AbortSession(ctx context.Context, sessionID string) error {
+func (c *Client) AbortSession(ctx context.Context, sessionID string) error {
 	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/session/%s/abort", sessionID), nil)
 	if err != nil {
 		return err
@@ -360,7 +360,7 @@ func (c *OpenCodeClient) AbortSession(ctx context.Context, sessionID string) err
 // ======================================
 
 // GetPath는 경로 정보를 조회합니다.
-func (c *OpenCodeClient) GetPath(ctx context.Context) (*PathInfo, error) {
+func (c *Client) GetPath(ctx context.Context) (*PathInfo, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/path", nil)
 	if err != nil {
 		return nil, err
@@ -383,7 +383,7 @@ func (c *OpenCodeClient) GetPath(ctx context.Context) (*PathInfo, error) {
 type EventHandler func(event *Event) error
 
 // SubscribeEvents는 이벤트 스트림을 구독합니다.
-func (c *OpenCodeClient) SubscribeEvents(ctx context.Context, handler EventHandler) error {
+func (c *Client) SubscribeEvents(ctx context.Context, handler EventHandler) error {
 	httpReq, err := c.buildRequest(ctx, http.MethodGet, "/event", nil)
 	if err != nil {
 		return err
@@ -450,7 +450,7 @@ func (c *OpenCodeClient) SubscribeEvents(ctx context.Context, handler EventHandl
 // ======================================
 
 // doRequest는 HTTP 요청을 수행합니다.
-func (c *OpenCodeClient) doRequest(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
+func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
 	req, err := c.buildRequest(ctx, method, path, body)
 	if err != nil {
 		return nil, err
@@ -470,7 +470,7 @@ func (c *OpenCodeClient) doRequest(ctx context.Context, method, path string, bod
 }
 
 // buildRequest는 HTTP 요청을 구성합니다.
-func (c *OpenCodeClient) buildRequest(ctx context.Context, method, path string, body interface{}) (*http.Request, error) {
+func (c *Client) buildRequest(ctx context.Context, method, path string, body interface{}) (*http.Request, error) {
 	url := c.baseURL + path
 
 	// directory 쿼리 파라미터 추가
@@ -502,7 +502,7 @@ func (c *OpenCodeClient) buildRequest(ctx context.Context, method, path string, 
 }
 
 // handleErrorResponse는 에러 응답을 처리합니다.
-func (c *OpenCodeClient) handleErrorResponse(resp *http.Response) error {
+func (c *Client) handleErrorResponse(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
 
 	// BadRequestError (400) 시도

@@ -1,13 +1,13 @@
-package taskrunner
+package docker
 
 import (
 	"context"
 	"io"
 )
 
-// DockerClient는 Docker Container 관리를 위한 인터페이스입니다.
+// Client는 Docker Container 관리를 위한 인터페이스입니다.
 // 테스트 시 mock 구현을 주입할 수 있도록 인터페이스로 정의합니다.
-type DockerClient interface {
+type Client interface {
 	// CreateContainer는 새로운 Container를 생성합니다.
 	CreateContainer(ctx context.Context, config ContainerConfig) (containerID string, err error)
 

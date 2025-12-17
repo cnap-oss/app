@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cnap-oss/app/internal/runner/docker"
+	"github.com/cnap-oss/app/internal/runner/opencode"
 	"go.uber.org/zap"
 )
 
@@ -37,7 +39,7 @@ type RunRequest struct {
 	TaskID       string
 	Model        string
 	SystemPrompt string
-	Messages     []ChatMessage
+	Messages     []opencode.ChatMessage
 }
 
 // AgentInfo는 에이전트 실행에 필요한 정보를 담는 구조체입니다.
@@ -76,7 +78,7 @@ type StatusCallback interface {
 	//
 	// Returns:
 	//   - error: 콜백 처리 실패 시 에러 (로깅용, Runner 실행에는 영향 없음)
-	OnEvent(taskID string, event *Event) error
+	OnEvent(taskID string, event *opencode.Event) error
 
 	// OnComplete는 Task가 성공적으로 완료될 때 호출됩니다.
 	//
@@ -134,8 +136,8 @@ type Runner struct {
 	WorkspacePath string // 마운트된 작업 공간 경로
 
 	// 세션 관리 (Runner 생명 주기 동안 유지)
-	apiClient   *OpenCodeClient    // OpenCode API 클라이언트
-	session     *Session           // OpenCode 세션
+	apiClient   *opencode.Client   // OpenCode API 클라이언트
+	session     *opencode.Session  // OpenCode 세션
 	sessionID   string             // 세션 ID
 	eventCtx    context.Context    // 이벤트 스트림 컨텍스트
 	eventCancel context.CancelFunc // 이벤트 스트림 취소 함수
@@ -146,7 +148,7 @@ type Runner struct {
 	callback StatusCallback
 
 	// 내부 의존성
-	dockerClient DockerClient
+	dockerClient docker.Client
 	httpClient   *http.Client
 	logger       *zap.Logger
 
@@ -159,7 +161,7 @@ type Runner struct {
 type RunnerOption func(*Runner)
 
 // WithDockerClient는 Runner가 사용할 DockerClient를 주입합니다(테스트용).
-func WithDockerClient(client DockerClient) RunnerOption {
+func WithDockerClient(client docker.Client) RunnerOption {
 	return func(r *Runner) {
 		r.dockerClient = client
 	}
@@ -195,8 +197,8 @@ func WithWorkspacePath(path string) RunnerOption {
 
 // OpenCodeRequest는 OpenCode Zen API 요청 바디입니다 (레거시).
 type OpenCodeRequest struct {
-	Model    string        `json:"model"`
-	Messages []ChatMessage `json:"messages"`
+	Model    string                 `json:"model"`
+	Messages []opencode.ChatMessage `json:"messages"`
 }
 
 // OpenCodeResponse는 OpenCode Zen API 응답 바디입니다.
@@ -271,7 +273,7 @@ func NewRunner(taskID string, agentInfo AgentInfo, callback StatusCallback, logg
 
 	// DockerClient가 주입되지 않았으면 새로 생성
 	if r.dockerClient == nil {
-		client, err := NewDockerClient()
+		client, err := docker.NewClient()
 		if err != nil {
 			return nil, fmt.Errorf("docker client 생성 실패: %w", err)
 		}
@@ -306,17 +308,17 @@ func (r *Runner) Start(ctx context.Context) error {
 	}
 
 	// Container 생성
-	containerID, err := r.dockerClient.CreateContainer(ctx, ContainerConfig{
+	containerID, err := r.dockerClient.CreateContainer(ctx, docker.ContainerConfig{
 		Image: imageName,
 		Name:  r.ContainerName,
 		Env:   env,
-		Mounts: []MountConfig{
+		Mounts: []docker.MountConfig{
 			{
 				Source: r.WorkspacePath,
 				Target: "/workspace",
 			},
 		},
-		PortBinding: &PortConfig{
+		PortBinding: &docker.PortConfig{
 			HostPort:      "0", // 동적 포트 할당
 			ContainerPort: fmt.Sprintf("%d", r.ContainerPort),
 		},
@@ -375,14 +377,14 @@ func (r *Runner) Start(ctx context.Context) error {
 	}
 
 	// OpenCode API 클라이언트 생성
-	r.apiClient = NewOpenCodeClient(
+	r.apiClient = opencode.NewClient(
 		r.BaseURL,
-		WithOpenCodeHTTPClient(r.httpClient),
-		WithOpenCodeLogger(r.logger),
+		opencode.WithHTTPClient(r.httpClient),
+		opencode.WithLogger(r.logger),
 	)
 
 	// 세션 생성
-	session, err := r.apiClient.CreateSession(ctx, &CreateSessionRequest{
+	session, err := r.apiClient.CreateSession(ctx, &opencode.CreateSessionRequest{
 		Title: r.ID,
 	})
 	if err != nil {
@@ -514,7 +516,7 @@ func (r *Runner) Stop(ctx context.Context) error {
 
 // handleEvent는 SSE 이벤트를 처리하는 핸들러입니다.
 // 이 메서드는 백그라운드 고루틴에서 실행되며, 모든 이벤트를 수신하여 처리합니다.
-func (r *Runner) handleEvent(event *Event) error {
+func (r *Runner) handleEvent(event *opencode.Event) error {
 	r.logger.Debug("이벤트 수신",
 		zap.String("runner_id", r.ID),
 		zap.String("event_type", event.Type),
@@ -675,17 +677,17 @@ func (r *Runner) runInternal(ctx context.Context, req *RunRequest) error {
 	providerID, modelID := parseModel(req.Model)
 
 	// 메시지를 프롬프트 파트로 변환
-	parts := make([]PromptPart, 0, len(messages))
+	parts := make([]opencode.PromptPart, 0, len(messages))
 	for _, msg := range messages {
-		parts = append(parts, TextPartInput{
+		parts = append(parts, opencode.TextPartInput{
 			Type: "text",
 			Text: msg.Content,
 		})
 	}
 
 	// 프롬프트 전송
-	promptReq := &PromptRequest{
-		Model: &PromptModel{
+	promptReq := &opencode.PromptRequest{
+		Model: &opencode.PromptModel{
 			ProviderID: providerID,
 			ModelID:    modelID,
 		},
@@ -702,9 +704,9 @@ func (r *Runner) runInternal(ctx context.Context, req *RunRequest) error {
 
 // buildMessages는 요청 메시지를 구성합니다.
 // 마지막 사용자 메시지만 반환합니다.
-func (r *Runner) buildMessages(req *RunRequest) []ChatMessage {
+func (r *Runner) buildMessages(req *RunRequest) []opencode.ChatMessage {
 	// 마지막 사용자 메시지 찾기
-	var lastUserMessage *ChatMessage
+	var lastUserMessage *opencode.ChatMessage
 	for i := len(req.Messages) - 1; i >= 0; i-- {
 		if req.Messages[i].Role == "user" {
 			lastUserMessage = &req.Messages[i]
@@ -714,17 +716,17 @@ func (r *Runner) buildMessages(req *RunRequest) []ChatMessage {
 
 	// 마지막 사용자 메시지가 없으면 빈 배열 반환
 	if lastUserMessage == nil {
-		return []ChatMessage{}
+		return []opencode.ChatMessage{}
 	}
 
 	// 마지막 사용자 메시지만 반환
-	return []ChatMessage{*lastUserMessage}
+	return []opencode.ChatMessage{*lastUserMessage}
 }
 
 // GetMessage는 특정 메시지의 정보를 조회합니다.
 func (r *Runner) GetMessage(ctx context.Context, messageID string) (*struct {
-	Info  Message `json:"info"`
-	Parts []Part  `json:"parts"`
+	Info  opencode.Message `json:"info"`
+	Parts []opencode.Part  `json:"parts"`
 }, error) {
 	if r.apiClient == nil || r.sessionID == "" {
 		return nil, fmt.Errorf("runner가 초기화되지 않음")

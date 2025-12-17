@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cnap-oss/app/internal/runner/opencode"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
@@ -22,7 +23,7 @@ type MockStatusCallback struct {
 	StartedSessionID string
 	CompletedCalled  bool
 	ErrorCalled      bool
-	Events           []*Event
+	Events           []*opencode.Event
 	Result           *RunResult
 	Error            error
 	Done             chan struct{}
@@ -30,7 +31,7 @@ type MockStatusCallback struct {
 
 func NewMockStatusCallback() *MockStatusCallback {
 	return &MockStatusCallback{
-		Events: make([]*Event, 0),
+		Events: make([]*opencode.Event, 0),
 		Done:   make(chan struct{}),
 	}
 }
@@ -43,7 +44,7 @@ func (m *MockStatusCallback) OnStarted(taskID string, sessionID string) error {
 	return nil
 }
 
-func (m *MockStatusCallback) OnEvent(taskID string, event *Event) error {
+func (m *MockStatusCallback) OnEvent(taskID string, event *opencode.Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Events = append(m.Events, event)
@@ -100,13 +101,13 @@ func TestRun_Async_Success(t *testing.T) {
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/session":
 			// 세션 생성
-			resp := Session{
+			resp := opencode.Session{
 				ID:        sessionID,
 				ProjectID: "proj_1",
 				Directory: "/workspace",
 				Title:     "task-1",
 				Version:   "1.0.0",
-				Time: SessionTime{
+				Time: opencode.SessionTime{
 					Created: 1234567890,
 					Updated: 1234567890,
 				},
@@ -120,7 +121,7 @@ func TestRun_Async_Success(t *testing.T) {
 			w.Header().Set("Connection", "keep-alive")
 
 			// 텍스트 이벤트 전송
-			event1 := Event{
+			event1 := opencode.Event{
 				Type: "message.part.updated",
 				Properties: map[string]interface{}{
 					"messageID": "msg_123",
@@ -135,7 +136,7 @@ func TestRun_Async_Success(t *testing.T) {
 			_, _ = w.Write([]byte("data: " + string(data1) + "\n\n"))
 
 			// 완료 이벤트 전송
-			event2 := Event{
+			event2 := opencode.Event{
 				Type: "message.completed",
 				Properties: map[string]interface{}{
 					"messageID": "msg_123",
@@ -149,8 +150,8 @@ func TestRun_Async_Success(t *testing.T) {
 		case r.Method == "POST" && r.URL.Path == "/session/"+sessionID+"/message":
 			// 프롬프트 전송
 			completed := int64(1234567900)
-			resp := PromptResponse{
-				Info: AssistantMessage{
+			resp := opencode.PromptResponse{
+				Info: opencode.AssistantMessage{
 					ID:         "msg_123",
 					SessionID:  sessionID,
 					Role:       "assistant",
@@ -158,26 +159,26 @@ func TestRun_Async_Success(t *testing.T) {
 					ModelID:    "grok-code",
 					ProviderID: "anthropic",
 					Mode:       "code",
-					Path: MessagePath{
+					Path: opencode.MessagePath{
 						Cwd:  "/workspace",
 						Root: "/workspace",
 					},
-					Time: MessageTime{
+					Time: opencode.MessageTime{
 						Created:   1234567890,
 						Completed: &completed,
 					},
 					Cost: 0.01,
-					Tokens: MessageTokens{
+					Tokens: opencode.MessageTokens{
 						Input:     100,
 						Output:    200,
 						Reasoning: 0,
-						Cache: MessageTokenCache{
+						Cache: opencode.MessageTokenCache{
 							Read:  0,
 							Write: 0,
 						},
 					},
 				},
-				Parts: []Part{
+				Parts: []opencode.Part{
 					{
 						ID:        "prt_123",
 						SessionID: sessionID,
@@ -212,7 +213,7 @@ func TestRun_Async_Success(t *testing.T) {
 		TaskID:       "task-1",
 		Model:        "anthropic/grok-code",
 		SystemPrompt: "You are a helpful assistant",
-		Messages: []ChatMessage{
+		Messages: []opencode.ChatMessage{
 			{Role: "user", Content: "Hello"},
 		},
 	}
