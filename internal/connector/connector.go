@@ -4,42 +4,38 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/cnap-oss/app/internal/connector/handlers"
 	"github.com/cnap-oss/app/internal/controller"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
 
-// Server는 Discord 봇의 세션, 로거, 에이전트 데이터 등 모든 상태를 관리하는 중앙 구조체입니다.
-type Server struct {
+// Connector는 Discord 봇의 세션, 로거, 에이전트 데이터 등 모든 상태를 관리하는 중앙 구조체입니다.
+type Connector struct {
 	logger              *zap.Logger
 	session             *discordgo.Session
 	controller          *controller.Controller
-	threadsMutex        sync.RWMutex
-	activeThreads       map[string]string
 	connectorEventChan  chan controller.ConnectorEvent
 	controllerEventChan <-chan controller.ControllerEvent
-	toolMessagesMutex   sync.RWMutex
-	toolMessages        map[string]string // key: taskID:callID, value: Discord messageID
+	discordHandler      *handlers.DiscordHandler
+	controllerHandler   *handlers.ControllerHandler
 }
 
 // NewServer는 새로운 connector 서버를 생성하고 초기화합니다.
-func NewServer(logger *zap.Logger, ctrl *controller.Controller, eventChan chan controller.ConnectorEvent, resultChan <-chan controller.ControllerEvent) *Server {
-	return &Server{
-		logger:              logger,
+func NewServer(logger *zap.Logger, ctrl *controller.Controller, eventChan chan controller.ConnectorEvent, resultChan <-chan controller.ControllerEvent) *Connector {
+	return &Connector{
+		logger:              logger.Named("connector"),
 		controller:          ctrl,
-		activeThreads:       make(map[string]string),
 		connectorEventChan:  eventChan,
 		controllerEventChan: resultChan,
-		toolMessages:        make(map[string]string),
 	}
 }
 
 // Start는 Discord 봇을 시작하고 Discord API에 연결합니다.
 // 환경 변수 로드, 세션 생성, 이벤트 핸들러 등록, 연결 열기 등의 작업을 수행합니다.
-func (s *Server) Start(ctx context.Context) error {
+func (s *Connector) Start(ctx context.Context) error {
 	s.logger.Info("Starting connector server (Discord Bot)")
 
 	if err := godotenv.Load(); err != nil {
@@ -57,9 +53,12 @@ func (s *Server) Start(ctx context.Context) error {
 	s.session = dg
 	s.session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages
 
-	s.session.AddHandler(s.readyHandler)
-	s.session.AddHandler(s.interactionRouter)
-	s.session.AddHandler(s.messageCreateHandler)
+	// 핸들러 초기화
+	s.discordHandler = handlers.NewDiscordHandler(s.logger, s.session, s.controller, s.connectorEventChan)
+	s.controllerHandler = handlers.NewControllerHandler(s.logger, s.session)
+
+	// Discord 이벤트 핸들러 등록
+	s.discordHandler.RegisterHandlers()
 
 	if err := s.session.Open(); err != nil {
 		return fmt.Errorf("error opening connection: %w", err)
@@ -67,8 +66,8 @@ func (s *Server) Start(ctx context.Context) error {
 
 	s.logger.Info("Bot is now running.")
 
-	// 결과 핸들러 goroutine 시작
-	go s.controllerEventHandler(ctx)
+	// Controller 이벤트 핸들러 goroutine 시작
+	go s.controllerHandler.Start(ctx, s.controllerEventChan)
 
 	// 컨텍스트가 취소될 때까지 대기
 	<-ctx.Done()
@@ -77,7 +76,7 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 // Stop은 Discord 세션을 정상적으로 닫고 봇을 종료합니다.
-func (s *Server) Stop(ctx context.Context) error {
+func (s *Connector) Stop(ctx context.Context) error {
 	s.logger.Info("Stopping connector server")
 	if s.session != nil {
 		if err := s.session.Close(); err != nil {
@@ -87,12 +86,4 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 	s.logger.Info("Connector server stopped")
 	return nil
-}
-
-// respondEphemeral은 사용자에게만 보이는 임시 메시지를 전송합니다.
-func (s *Server) respondEphemeral(i *discordgo.InteractionCreate, content string) {
-	err := s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: content, Flags: discordgo.MessageFlagsEphemeral}})
-	if err != nil {
-		s.logger.Error("Failed to send ephemeral message", zap.Error(err))
-	}
 }
