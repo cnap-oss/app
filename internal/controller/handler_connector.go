@@ -91,26 +91,16 @@ func (c *Controller) handleContinueEvent(ctx context.Context, event ConnectorEve
 		zap.String("task_id", taskID),
 	)
 
-	if err := c.AddMessage(ctx, taskID, "user", event.Prompt); err != nil {
-		c.logger.Error("Failed to add message to task", zap.Error(err))
-		c.controllerEventChan <- ControllerEvent{
-			TaskID: taskID,
-			Status: "failed",
-			Error:  fmt.Errorf("failed to add message: %w", err),
-		}
-		return
-	}
-
-	// 4. Task 실행 (메시지 히스토리 포함) - SendMessage 사용
-	if err := c.SendMessage(ctx, taskID); err != nil {
-		c.logger.Error("Failed to send message",
+	// SendOneMessage를 사용하여 메시지 추가 및 즉시 실행
+	if err := c.SendOneMessage(ctx, taskID, event.Prompt); err != nil {
+		c.logger.Error("Failed to send one message",
 			zap.String("task_id", taskID),
 			zap.Error(err),
 		)
 		c.controllerEventChan <- ControllerEvent{
 			TaskID: taskID,
 			Status: "failed",
-			Error:  fmt.Errorf("failed to send message: %w", err),
+			Error:  fmt.Errorf("failed to send one message: %w", err),
 		}
 	}
 }
@@ -192,7 +182,7 @@ func (c *Controller) handleCompleteEvent(ctx context.Context, event ConnectorEve
 			zap.Error(err),
 		)
 	}
-	
+
 	// 4. TaskContext 정리 (Runner와 생명주기 일치)
 	c.cleanupTaskContext(taskID)
 

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/cnap-oss/app/internal/common"
+	taskrunner "github.com/cnap-oss/app/internal/runner"
+	"github.com/cnap-oss/app/internal/runner/opencode"
 	"github.com/cnap-oss/app/internal/storage"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -217,4 +219,117 @@ func (c *Controller) readMessageFromFile(filePath string) (string, error) {
 	}
 
 	return content, nil
+}
+
+// SendOneMessage adds a single user message to the task and immediately executes it.
+// Unlike SendMessage which executes all accumulated messages, this function only sends
+// the newly added message to the Runner.
+func (c *Controller) SendOneMessage(ctx context.Context, taskID, content string) error {
+	c.logger.Info("Sending one message for task",
+		zap.String("task_id", taskID),
+	)
+
+	if c.repo == nil {
+		return fmt.Errorf("controller: repository is not configured")
+	}
+
+	// Task 조회
+	task, err := c.repo.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("task not found: %s", taskID)
+		}
+		return err
+	}
+
+	// 메시지를 파일로 저장하고 인덱스 생성
+	filePath, err := c.saveMessageToFile(ctx, taskID, "user", content)
+	if err != nil {
+		c.logger.Error("Failed to save message to file", zap.Error(err))
+		return err
+	}
+
+	if _, err := c.repo.AppendMessageIndex(ctx, taskID, "user", filePath); err != nil {
+		c.logger.Error("Failed to add message", zap.Error(err))
+		return err
+	}
+
+	c.logger.Info("Message added successfully",
+		zap.String("task_id", taskID),
+		zap.String("file_path", filePath),
+	)
+
+	// Agent 정보 조회 (Runner 생성에 필요)
+	agent, err := c.repo.GetAgent(ctx, task.AgentID)
+	if err != nil {
+		c.logger.Error("Failed to get agent info", zap.Error(err))
+		return err
+	}
+
+	// Runner 조회
+	runner := c.runnerManager.GetRunner(taskID)
+	if runner == nil {
+		// Runner가 없으면 자동으로 재생성
+		c.logger.Info("Runner not found, recreating...",
+			zap.String("task_id", taskID),
+			zap.String("agent_id", task.AgentID),
+		)
+
+		agentInfo := taskrunner.AgentInfo{
+			AgentID:  agent.AgentID,
+			Provider: agent.Provider,
+			Model:    agent.Model,
+			Prompt:   agent.Prompt,
+		}
+
+		// Runner 생성 (Controller를 callback으로 전달)
+		runner, err = c.runnerManager.CreateRunner(ctx, taskID, agentInfo, c)
+		if err != nil {
+			c.logger.Error("Failed to create runner", zap.Error(err))
+			return fmt.Errorf("failed to create runner: %w", err)
+		}
+
+		// Runner 시작
+		if err := c.runnerManager.StartRunner(ctx, taskID); err != nil {
+			c.logger.Error("Failed to start runner", zap.Error(err))
+			// 생성된 Runner 정리
+			_ = c.runnerManager.DeleteRunner(ctx, taskID)
+			return fmt.Errorf("failed to start runner: %w", err)
+		}
+
+		c.logger.Info("Runner recreated successfully",
+			zap.String("task_id", taskID),
+		)
+	}
+
+	// 단일 메시지만 포함하는 ChatMessage 구성
+	messages := []opencode.ChatMessage{
+		{
+			Role:    "user",
+			Content: content,
+		},
+	}
+
+	// RunRequest 구성 (콜백은 Runner 생성 시 등록됨)
+	req := &taskrunner.RunRequest{
+		TaskID:       taskID,
+		Model:        agent.Model,
+		SystemPrompt: agent.Prompt,
+		Messages:     messages,
+	}
+
+	// TaskRunner 실행 (비동기, 결과는 callback으로 처리됨)
+	if err := runner.Run(ctx, req); err != nil {
+		c.logger.Error("Failed to start task execution",
+			zap.String("task_id", taskID),
+			zap.Error(err),
+		)
+		return fmt.Errorf("failed to run task: %w", err)
+	}
+
+	c.logger.Info("Message sent successfully",
+		zap.String("task_id", taskID),
+	)
+
+	return nil
 }
