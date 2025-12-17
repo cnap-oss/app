@@ -436,6 +436,26 @@ func (r *Runner) Start(ctx context.Context) error {
 	return nil
 }
 
+// IsContainerStopped는 Container가 stopped 상태인지 확인합니다.
+func (r *Runner) IsContainerStopped(ctx context.Context) bool {
+	if r.ContainerID == "" {
+		return true
+	}
+
+	info, err := r.dockerClient.ContainerInspect(ctx, r.ContainerID)
+	if err != nil {
+		r.logger.Warn("Container 상태 확인 실패",
+			zap.String("runner_id", r.ID),
+			zap.String("container_id", r.ContainerID),
+			zap.Error(err),
+		)
+		return true
+	}
+
+	// exited 또는 stopped 상태면 true 반환
+	return info.State == "exited" || info.State == "stopped"
+}
+
 // Stop은 Runner Container를 중지하고 제거합니다.
 func (r *Runner) Stop(ctx context.Context) error {
 	r.logger.Info("Stopping runner container",
