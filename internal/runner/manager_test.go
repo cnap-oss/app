@@ -26,7 +26,7 @@ func TestRunnerManager_Singleton(t *testing.T) {
 }
 
 func TestRunnerManager_CRUD(t *testing.T) {
-	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+	t.Setenv("OPENCODE_API_KEY", "test-key")
 
 	rm := GetRunnerManager()
 
@@ -68,7 +68,7 @@ func TestRunnerManager_CRUD(t *testing.T) {
 
 // TestRunnerManager_GetRunner tests the GetRunner method
 func TestRunnerManager_GetRunner(t *testing.T) {
-	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+	t.Setenv("OPENCODE_API_KEY", "test-key")
 
 	rm := GetRunnerManager()
 	rm.mu.Lock()
@@ -98,7 +98,7 @@ func TestRunnerManager_GetRunner(t *testing.T) {
 
 // TestRunnerManager_ConcurrentAccess tests concurrent access to RunnerManager
 func TestRunnerManager_ConcurrentAccess(t *testing.T) {
-	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+	t.Setenv("OPENCODE_API_KEY", "test-key")
 
 	rm := GetRunnerManager()
 	rm.mu.Lock()
@@ -160,7 +160,7 @@ func TestRunnerManager_ConcurrentAccess(t *testing.T) {
 
 // TestRunnerManager_GetRunnerCount tests the GetRunnerCount method
 func TestRunnerManager_GetRunnerCount(t *testing.T) {
-	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+	t.Setenv("OPENCODE_API_KEY", "test-key")
 
 	rm := GetRunnerManager()
 	rm.mu.Lock()

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/cnap-oss/app/internal/common"
 	"go.uber.org/zap"
 )
 
@@ -224,18 +225,10 @@ func (sm *settingsManager) BuildContainerEnv(agentID string, additionalEnv map[s
 		env = append(env, fmt.Sprintf("OPENCODE_PROVIDER=%s", config.Provider))
 	}
 
-	// API 키 전달 (호스트 환경 변수에서)
-	apiKeyEnvs := []string{
-		"OPENCODE_API_KEY",
-		"ANTHROPIC_API_KEY",
-		"OPENAI_API_KEY",
-		"GOOGLE_API_KEY",
-		"AZURE_OPENAI_API_KEY",
-	}
-	for _, key := range apiKeyEnvs {
-		if val := os.Getenv(key); val != "" {
-			env = append(env, fmt.Sprintf("%s=%s", key, val))
-		}
+	// API 키 전달 (config에서)
+	cfg, err := common.LoadConfig()
+	if err == nil {
+		env = append(env, cfg.GetAPIKeyEnvVars()...)
 	}
 
 	// MCP 설정에서 환경 변수 추출 및 치환

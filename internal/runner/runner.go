@@ -174,13 +174,6 @@ func WithHTTPClient(client *http.Client) RunnerOption {
 	}
 }
 
-// WithBaseURL은 Runner가 요청할 기본 URL을 지정합니다(테스트용).
-func WithBaseURL(url string) RunnerOption {
-	return func(r *Runner) {
-		r.baseURL = url
-	}
-}
-
 // WithContainerPort는 Container 내부 포트를 지정합니다(테스트용).
 func WithContainerPort(port int) RunnerOption {
 	return func(r *Runner) {
