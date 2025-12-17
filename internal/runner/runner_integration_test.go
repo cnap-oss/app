@@ -107,19 +107,19 @@ func (m *mockCallback) GetCompleteResult() *RunResult {
 // 실제 OpenCode API와 통신하는 통합 테스트입니다.
 // - Docker가 실행 중이어야 합니다.
 // - cnap-runner 이미지가 빌드되어 있어야 합니다.
-// - OPENCODE_API_KEY 또는 OPEN_CODE_API_KEY가 설정되어 있어야 합니다.
+// - OPENCODE_API_KEY 또는 OPENCODE_API_KEY가 설정되어 있어야 합니다.
 func TestRunner_RealAPI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode: skipping real API call")
 	}
 
-	// API 키 확인 (OPENCODE_API_KEY 또는 레거시 OPEN_CODE_API_KEY)
+	// API 키 확인 (OPENCODE_API_KEY 또는 레거시 OPENCODE_API_KEY)
 	apiKey := os.Getenv("OPENCODE_API_KEY")
 	if apiKey == "" {
-		apiKey = os.Getenv("OPEN_CODE_API_KEY")
+		apiKey = os.Getenv("OPENCODE_API_KEY")
 	}
 	if apiKey == "" {
-		t.Skip("OPENCODE_API_KEY or OPEN_CODE_API_KEY not set; skipping real API call")
+		t.Skip("OPENCODE_API_KEY or OPENCODE_API_KEY not set; skipping real API call")
 	}
 
 	// 콜백 생성
@@ -186,10 +186,10 @@ func TestRunner_RealAPI_WithCallback(t *testing.T) {
 	// API 키 확인
 	apiKey := os.Getenv("OPENCODE_API_KEY")
 	if apiKey == "" {
-		apiKey = os.Getenv("OPEN_CODE_API_KEY")
+		apiKey = os.Getenv("OPENCODE_API_KEY")
 	}
 	if apiKey == "" {
-		t.Skip("OPENCODE_API_KEY or OPEN_CODE_API_KEY not set; skipping real API call")
+		t.Skip("OPENCODE_API_KEY or OPENCODE_API_KEY not set; skipping real API call")
 	}
 
 	// 콜백 생성
@@ -284,10 +284,10 @@ func TestRunner_RealAPI_EmptyResponseHandling(t *testing.T) {
 	// API 키 확인
 	apiKey := os.Getenv("OPENCODE_API_KEY")
 	if apiKey == "" {
-		apiKey = os.Getenv("OPEN_CODE_API_KEY")
+		apiKey = os.Getenv("OPENCODE_API_KEY")
 	}
 	if apiKey == "" {
-		t.Skip("OPENCODE_API_KEY or OPEN_CODE_API_KEY not set; skipping real API call")
+		t.Skip("OPENCODE_API_KEY or OPENCODE_API_KEY not set; skipping real API call")
 	}
 
 	// 콜백 생성

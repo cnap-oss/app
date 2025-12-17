@@ -90,7 +90,7 @@ func (m *MockStatusCallback) GetTextContent() string {
 
 // TestRun_Async_Success tests async Run implementation with new OpenCode API
 func TestRun_Async_Success(t *testing.T) {
-	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+	t.Setenv("OPENCODE_API_KEY", "test-key")
 
 	sessionID := "ses_test123"
 
@@ -240,10 +240,9 @@ func TestRun_Async_Success(t *testing.T) {
 
 // TestNewRunner_WithOptions tests Runner creation with options
 func TestNewRunner_WithOptions(t *testing.T) {
-	t.Setenv("OPEN_CODE_API_KEY", "test-key")
+	t.Setenv("OPENCODE_API_KEY", "test-key")
 
 	customClient := &http.Client{Timeout: 5 * time.Second}
-	customBaseURL := "https://custom.api.example.com"
 
 	callback := NewMockStatusCallback()
 	runner, err := NewRunner(
@@ -252,12 +251,9 @@ func TestNewRunner_WithOptions(t *testing.T) {
 		callback,
 		zaptest.NewLogger(t),
 		WithHTTPClient(customClient),
-		WithBaseURL(customBaseURL),
 	)
 
 	require.NoError(t, err)
 	assert.NotNil(t, runner)
 	assert.Equal(t, customClient, runner.httpClient)
-	assert.Equal(t, customBaseURL, runner.baseURL)
-	assert.Equal(t, "test-key", runner.apiKey)
 }

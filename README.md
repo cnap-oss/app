@@ -31,11 +31,13 @@ cnap-app/
 `golangci-lint`는 여러 Go linter를 통합 실행하는 도구로, CI에서 코드 품질 검사에 사용됩니다.
 
 **macOS (Homebrew):**
+
 ```bash
 brew install golangci-lint
 ```
 
 **Linux:**
+
 ```bash
 # Binary 직접 설치 (최신 버전)
 curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
@@ -45,6 +47,7 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ```
 
 **설치 확인:**
+
 ```bash
 golangci-lint --version
 ```
@@ -52,6 +55,7 @@ golangci-lint --version
 #### 2. 기타 개발 도구
 
 **Make** (빌드 자동화):
+
 ```bash
 # macOS
 brew install make
@@ -64,6 +68,7 @@ sudo yum install make       # RHEL/CentOS
 ### 개발 워크플로우
 
 #### 코드 포매팅
+
 ```bash
 # Go 표준 포매터 실행
 make fmt
@@ -74,6 +79,7 @@ gofmt -s -w .
 ```
 
 #### Lint 검사
+
 ```bash
 # golangci-lint 실행 (프로젝트 루트의 .golangci.toml 설정 사용)
 make lint
@@ -89,6 +95,7 @@ golangci-lint run --fix
 ```
 
 #### 전체 검사 실행
+
 ```bash
 # 포매팅, Lint, 테스트를 한번에 실행
 make check
@@ -114,16 +121,16 @@ make check
 
 ### Makefile 주요 명령어
 
-| 명령어 | 설명 |
-| --- | --- |
-| `make build` | 바이너리 빌드 (`bin/cnap`) |
-| `make fmt` | 코드 포매팅 (`gofmt`, `goimports`) |
-| `make lint` | golangci-lint 실행 |
-| `make test` | 모든 테스트 실행 |
-| `make test-coverage` | 커버리지 리포트 생성 |
-| `make check` | fmt + lint + test 실행 |
-| `make clean` | 빌드 산출물 삭제 |
-| `make docker-build` | Docker 이미지 빌드 |
+| 명령어               | 설명                               |
+| -------------------- | ---------------------------------- |
+| `make build`         | 바이너리 빌드 (`bin/cnap`)         |
+| `make fmt`           | 코드 포매팅 (`gofmt`, `goimports`) |
+| `make lint`          | golangci-lint 실행                 |
+| `make test`          | 모든 테스트 실행                   |
+| `make test-coverage` | 커버리지 리포트 생성               |
+| `make check`         | fmt + lint + test 실행             |
+| `make clean`         | 빌드 산출물 삭제                   |
+| `make docker-build`  | Docker 이미지 빌드                 |
 
 ### 4. 빌드
 
@@ -133,13 +140,58 @@ make build
 go build -o cnap ./cmd/cnap
 ```
 
-### 5. CLI 빠른 시작
+### 5. 설정
+
+CNAP은 두 가지 방법으로 설정할 수 있습니다:
+
+#### 방법 1: 환경 변수 (기본)
+
+```bash
+# .env 파일 생성
+cp .env.example .env
+
+# 필수 설정 입력
+# - DISCORD_TOKEN: Discord 봇 토큰
+# - OPENCODE_API_KEY: OpenCode API 키
+```
+
+#### 방법 2: YAML 설정 파일
+
+```bash
+# config.yml 파일 생성
+cp config.example.yml config.yml
+
+# config.yml 편집하여 설정 입력
+```
+
+**YAML 설정 우선순위:**
+
+- YAML 파일에 정의된 값이 기본값으로 사용됩니다
+- 환경 변수가 있으면 YAML 값을 오버라이드합니다
+- CLI 실행 시 `--config` 플래그로 YAML 파일 경로를 지정할 수 있습니다
+
+**주요 설정 항목:**
+
+| 설정             | 환경 변수           | YAML 경로            | 설명                   |
+| ---------------- | ------------------- | -------------------- | ---------------------- |
+| Discord 토큰     | `DISCORD_TOKEN`     | `discord.token`      | Discord 봇 토큰 (필수) |
+| OpenCode API 키  | `OPENCODE_API_KEY`  | `api_keys.opencode`  | OpenCode API 키 (필수) |
+| Anthropic API 키 | `ANTHROPIC_API_KEY` | `api_keys.anthropic` | Anthropic API 키       |
+| OpenAI API 키    | `OPENAI_API_KEY`    | `api_keys.openai`    | OpenAI API 키          |
+| 실행 환경        | `ENV`               | `app.env`            | development/production |
+| 로그 레벨        | `LOG_LEVEL`         | `app.log_level`      | debug/info/warn/error  |
+| 데이터베이스 URL | `DATABASE_URL`      | `database.dsn`       | PostgreSQL DSN         |
+| Runner 이미지    | `RUNNER_IMAGE`      | `runner.image`       | Docker 이미지 이름     |
+
+전체 설정 항목은 [`config.example.yml`](config.example.yml) 또는 [`.env.example`](.env.example)을 참고하세요.
+
+### 6. CLI 빠른 시작
 
 CNAP CLI를 사용한 기본 파이프라인입니다. 자세한 내용은 [CLI 빠른 시작 가이드](docs/cli-quickstart-guide.md)를 참고하세요.
 
 ```bash
 # 환경 변수 설정
-export OPEN_CODE_API_KEY="your-api-key"
+export OPENCODE_API_KEY="your-api-key"
 
 # Agent 생성
 echo -e "my-bot\nAI 비서\ngpt-4\n친절한 AI입니다" | ./bin/cnap agent create
@@ -153,12 +205,13 @@ echo -e "my-bot\nAI 비서\ngpt-4\n친절한 AI입니다" | ./bin/cnap agent cre
 ```
 
 **주요 기능:**
+
 - ✅ 프로세스 재시작 후에도 Task 실행 가능 (Runner 자동 재생성)
 - ✅ SQLite 기본 지원 (별도 DB 설정 불필요)
 - ✅ 멀티턴 대화 지원
 - ✅ 메시지 파일 시스템 저장
 
-### 6. 테스트
+### 7. 테스트
 
 저장소 동작과 컨트롤러 흐름은 GORM의 인메모리(SQLite) 드라이버를 활용한 단위 테스트로 검증됩니다.
 
@@ -197,18 +250,18 @@ CNAP은 PostgreSQL과 GORM을 사용하여 다음 엔티티를 관리합니다.
 - `run_steps`: 작업 단계 기록
 - `checkpoints`: Git 스냅샷(해시) 기록
 
-### 환경 변수
+### 데이터베이스 환경 변수
 
-| 변수 | 필수 | 설명 | 기본값 |
-| --- | --- | --- | --- |
-| `DATABASE_URL` | ✅ | PostgreSQL 연결 DSN (예: `postgres://user:pass@localhost:5432/cnap?sslmode=disable`) | 없음 |
-| `DB_LOG_LEVEL` |  | GORM 로그 레벨 (`silent`, `error`, `warn`, `info`) | `warn` |
-| `DB_MAX_IDLE` |  | 연결 풀 idle 개수 | `5` |
-| `DB_MAX_OPEN` |  | 연결 풀 최대 개수 | `20` |
-| `DB_CONN_LIFETIME` |  | 연결 최대 수명 (예: `1h`) | `30m` |
-| `DB_SKIP_DEFAULT_TXN` |  | 기본 트랜잭션 생략 여부 (`true`/`false`) | `true` |
-| `DB_PREPARE_STMT` |  | Prepare statement 캐시 활성화 여부 | `false` |
-| `DB_DISABLE_AUTO_PING` |  | GORM 자동 `Ping` 비활성화 | `false` |
+| 변수                   | 필수 | 설명                                               | 기본값             |
+| ---------------------- | ---- | -------------------------------------------------- | ------------------ |
+| `DATABASE_URL`         |      | PostgreSQL 연결 DSN                                | SQLite (로컬 파일) |
+| `DB_LOG_LEVEL`         |      | GORM 로그 레벨 (`silent`, `error`, `warn`, `info`) | `warn`             |
+| `DB_MAX_IDLE`          |      | 연결 풀 idle 개수                                  | `5`                |
+| `DB_MAX_OPEN`          |      | 연결 풀 최대 개수                                  | `20`               |
+| `DB_CONN_LIFETIME`     |      | 연결 최대 수명 (예: `1h`)                          | `30m`              |
+| `DB_SKIP_DEFAULT_TXN`  |      | 기본 트랜잭션 생략 여부 (`true`/`false`)           | `true`             |
+| `DB_PREPARE_STMT`      |      | Prepare statement 캐시 활성화 여부                 | `false`            |
+| `DB_DISABLE_AUTO_PING` |      | GORM 자동 `Ping` 비활성화                          | `false`            |
 
 애플리케이션이 시작될 때 자동으로 스키마 마이그레이션을 수행하며, 메시지 본문은 데이터베이스가 아닌 로컬 JSON 파일로 유지됩니다.
 
@@ -221,6 +274,13 @@ docker compose -f docker/docker-compose.yml up -d
 ```
 
 환경 변수는 다음과 같이 기본값을 재정의할 수 있습니다.
+
+- 데이터베이스: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`
+- 애플리케이션: `APP_ENV`, `APP_LOG_LEVEL`
+
+## 라이선스
+
+MIT License
 
 - 데이터베이스: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`
 - 애플리케이션: `APP_ENV`, `APP_LOG_LEVEL`

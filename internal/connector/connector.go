@@ -3,9 +3,9 @@ package connector
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/cnap-oss/app/internal/common"
 	"github.com/cnap-oss/app/internal/connector/handlers"
 	"github.com/cnap-oss/app/internal/controller"
 	"github.com/joho/godotenv"
@@ -21,6 +21,7 @@ type Connector struct {
 	controllerEventChan <-chan controller.ControllerEvent
 	discordHandler      *handlers.DiscordHandler
 	controllerHandler   *handlers.ControllerHandler
+	config              *common.Config
 }
 
 // NewServer는 새로운 connector 서버를 생성하고 초기화합니다.
@@ -41,12 +42,19 @@ func (s *Connector) Start(ctx context.Context) error {
 	if err := godotenv.Load(); err != nil {
 		s.logger.Warn("Could not load .env file", zap.Error(err))
 	}
-	token := os.Getenv("DISCORD_TOKEN")
-	if token == "" {
+
+	// Load centralized config
+	cfg, err := common.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	s.config = cfg
+
+	if cfg.Discord.Token == "" {
 		return fmt.Errorf("DISCORD_TOKEN environment variable not set")
 	}
 
-	dg, err := discordgo.New("Bot " + token)
+	dg, err := discordgo.New("Bot " + cfg.Discord.Token)
 	if err != nil {
 		return fmt.Errorf("error creating Discord session: %w", err)
 	}

@@ -1,0 +1,58 @@
+# CNAP Configuration File Example
+# Copy this file to config.yml and fill with your values
+
+# Application Configuration
+app:
+  # Runtime environment (development, production)
+  env: production
+  # Log level (debug, info, warn, error)
+  log_level: info
+
+# Database Configuration
+database:
+  # Database connection URL
+  # For PostgreSQL: postgres://user:password@host:port/database?sslmode=disable
+  # For SQLite: leave empty or use file path
+  dsn: "postgres://cnap:cnap@localhost:5432/cnap?sslmode=disable"
+  # GORM log level (silent, error, warn, info)
+  log_level: warn
+  # Connection pool settings
+  max_idle_conns: 5
+  max_open_conns: 20
+  conn_max_lifetime: 30m
+  skip_default_txn: true
+  prepare_stmt: false
+  disable_automatic_ping: false
+
+# Discord Bot Configuration
+discord:
+  # Discord bot token (required)
+  token: "your-discord-bot-token"
+
+# API Keys Configuration
+api_keys:
+  # OpenCode API key (required)
+  opencode: "your-opencode-api-key"
+  # Anthropic API key (optional)
+  anthropic: ""
+  # OpenAI API key (optional)
+  openai: ""
+
+# Runner Configuration
+runner:
+  # Docker image for task runners
+  # Defaults:
+  #   - production: ghcr.io/cnap-oss/cnap-runner:latest
+  #   - development: cnap-runner:latest
+  image: ""
+  # Runner workspace directory
+  workspace_dir: ""
+
+# Directory Configuration
+directory:
+  # Base data directory (default: $HOME/.cnap)
+  cnap_dir: ""
+  # Workspace base directory
+  workspace_base_dir: ""
+  # SQLite database path
+  sqlite_database: ""
