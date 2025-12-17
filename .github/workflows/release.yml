@@ -126,7 +126,7 @@ jobs:
       - name: Build binary
         shell: bash
         run: |
-          BINARY_NAME="opencode-bot-${{ needs.create-release.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
+          BINARY_NAME="cnap-${{ needs.create-release.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
           if [ "${{ matrix.os }}" = "windows" ]; then
             BINARY_NAME="${BINARY_NAME}.exe"
           fi
@@ -140,7 +140,7 @@ jobs:
             -ldflags="${LDFLAGS}" \
             -trimpath \
             -o "${BINARY_NAME}" \
-            ./cmd/opencode-bot
+            ./cmd/cnap
 
           echo "BINARY_NAME=${BINARY_NAME}" >> $GITHUB_ENV
 
