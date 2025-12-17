@@ -189,6 +189,27 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 		c.logger.Info("Runner recreated successfully",
 			zap.String("task_id", taskID),
 		)
+	} else {
+		// Runner가 존재하지만 Container가 stopped 상태인지 확인
+		if runner.IsContainerStopped(ctx) {
+			c.logger.Info("Container is stopped, restarting...",
+				zap.String("task_id", taskID),
+				zap.String("container_id", runner.ContainerID),
+			)
+
+			// Container 재시작
+			if err := c.runnerManager.StartRunner(ctx, taskID); err != nil {
+				c.logger.Error("Failed to restart runner", zap.Error(err))
+				_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+				// Runner 정리 후 재생성 시도
+				_ = c.runnerManager.DeleteRunner(ctx, taskID)
+				return
+			}
+
+			c.logger.Info("Container restarted successfully",
+				zap.String("task_id", taskID),
+			)
+		}
 	}
 
 	// 메시지 목록 조회 및 변환
