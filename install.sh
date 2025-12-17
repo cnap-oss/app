@@ -201,7 +201,7 @@ check_docker() {
     fi
     
     echo ""
-    read -p "Docker를 자동으로 설치하시겠습니까? (y/N): " -n 1 -r
+    read -p "Docker를 자동으로 설치하시겠습니까? (y/N): " -r REPLY
     echo ""
     
     if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -250,7 +250,7 @@ create_config() {
     
     if [ -f "$CONFIG_FILE" ]; then
         log_warn "설정 파일이 이미 존재합니다: $CONFIG_FILE"
-        read -p "기존 설정 파일을 덮어쓰시겠습니까? (y/N): " -n 1 -r
+        read -p "기존 설정 파일을 덮어쓰시겠습니까? (y/N): " -r REPLY
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             log_info "설정 파일 생성을 건너뜁니다."
@@ -385,7 +385,7 @@ setup_shell_profile() {
     echo "  Fish:  set -Ux fish_user_paths \$HOME/.cnap/bin \$fish_user_paths"
     echo ""
     
-    read -p "현재 쉘($CURRENT_SHELL)의 프로파일을 자동으로 업데이트하시겠습니까? (y/N): " -n 1 -r
+    read -p "현재 쉘($CURRENT_SHELL)의 프로파일을 자동으로 업데이트하시겠습니까? (y/N): " -r REPLY
     echo ""
     
     if [[ $REPLY =~ ^[Yy]$ ]]; then
