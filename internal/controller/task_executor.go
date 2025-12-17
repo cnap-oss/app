@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	taskrunner "github.com/cnap-oss/app/internal/runner"
+	"github.com/cnap-oss/app/internal/runner/opencode"
 	"github.com/cnap-oss/app/internal/storage"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -199,7 +200,7 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 	}
 
 	// ChatMessage로 변환 - 파일에서 실제 내용 읽기
-	chatMessages := make([]taskrunner.ChatMessage, 0, len(messages))
+	chatMessages := make([]opencode.ChatMessage, 0, len(messages))
 	for _, msg := range messages {
 		// 파일에서 메시지 내용 읽기
 		content, err := c.readMessageFromFile(msg.FilePath)
@@ -213,7 +214,7 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 			continue
 		}
 
-		chatMessages = append(chatMessages, taskrunner.ChatMessage{
+		chatMessages = append(chatMessages, opencode.ChatMessage{
 			Role:    msg.Role,
 			Content: content,
 		})
@@ -221,7 +222,7 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 
 	// Prompt가 있으면 추가
 	if task.Prompt != "" {
-		chatMessages = append(chatMessages, taskrunner.ChatMessage{
+		chatMessages = append(chatMessages, opencode.ChatMessage{
 			Role:    "user",
 			Content: task.Prompt,
 		})

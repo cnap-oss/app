@@ -6,6 +6,7 @@ import (
 	"time"
 
 	taskrunner "github.com/cnap-oss/app/internal/runner"
+	"github.com/cnap-oss/app/internal/runner/opencode"
 	"github.com/cnap-oss/app/internal/testutil/mocks"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +28,7 @@ func (m *MockCallback) OnStarted(taskID string, sessionID string) error {
 	return nil
 }
 
-func (m *MockCallback) OnEvent(taskID string, event *taskrunner.Event) error {
+func (m *MockCallback) OnEvent(taskID string, event *opencode.Event) error {
 	return nil
 }
 
@@ -53,7 +54,7 @@ func TestMockRunner_Run(t *testing.T) {
 		TaskID:       "task-001",
 		Model:        "gpt-4",
 		SystemPrompt: "You are a helpful assistant",
-		Messages: []taskrunner.ChatMessage{
+		Messages: []opencode.ChatMessage{
 			{Role: "user", Content: "Hi"},
 		},
 	}

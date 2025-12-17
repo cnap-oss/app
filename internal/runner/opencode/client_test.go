@@ -1,4 +1,4 @@
-package taskrunner
+package opencode
 
 import (
 	"context"
@@ -36,7 +36,7 @@ func TestOpenCodeClient_CreateSession(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenCodeClient(server.URL)
+	client := NewClient(server.URL)
 	session, err := client.CreateSession(context.Background(), &CreateSessionRequest{
 		Title: "Test Session",
 	})
@@ -66,7 +66,7 @@ func TestOpenCodeClient_GetSession(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenCodeClient(server.URL)
+	client := NewClient(server.URL)
 	session, err := client.GetSession(context.Background(), "ses_123")
 
 	require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestOpenCodeClient_DeleteSession(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenCodeClient(server.URL)
+	client := NewClient(server.URL)
 	err := client.DeleteSession(context.Background(), "ses_123")
 
 	require.NoError(t, err)
@@ -150,7 +150,7 @@ func TestOpenCodeClient_Prompt(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenCodeClient(server.URL)
+	client := NewClient(server.URL)
 	resp, err := client.Message(context.Background(), "ses_123", &PromptRequest{
 		Model: &PromptModel{
 			ProviderID: "anthropic",
@@ -242,7 +242,7 @@ func TestOpenCodeClient_GetMessages(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenCodeClient(server.URL)
+	client := NewClient(server.URL)
 	messages, err := client.GetMessages(context.Background(), "ses_123", nil)
 
 	require.NoError(t, err)
@@ -273,7 +273,7 @@ func TestOpenCodeClient_GetPath(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenCodeClient(server.URL)
+	client := NewClient(server.URL)
 	path, err := client.GetPath(context.Background())
 
 	require.NoError(t, err)
@@ -293,7 +293,7 @@ func TestOpenCodeClient_ErrorHandling(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenCodeClient(server.URL)
+	client := NewClient(server.URL)
 	_, err := client.CreateSession(context.Background(), &CreateSessionRequest{})
 
 	require.Error(t, err)
@@ -312,7 +312,7 @@ func TestOpenCodeClient_NotFoundError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenCodeClient(server.URL)
+	client := NewClient(server.URL)
 	_, err := client.GetSession(context.Background(), "ses_nonexistent")
 
 	require.Error(t, err)
@@ -339,7 +339,7 @@ func TestOpenCodeClient_WithDirectory(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenCodeClient(server.URL, WithOpenCodeDirectory("/workspace/project"))
+	client := NewClient(server.URL, WithDirectory("/workspace/project"))
 	session, err := client.CreateSession(context.Background(), &CreateSessionRequest{
 		Title: "Test Session",
 	})
@@ -355,7 +355,7 @@ func TestOpenCodeClient_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenCodeClient(server.URL)
+	client := NewClient(server.URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // 즉시 취소
 

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cnap-oss/app/internal/runner/opencode"
 	"github.com/joho/godotenv"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -52,7 +53,7 @@ func (m *mockCallback) OnStarted(taskID string, sessionID string) error {
 	return nil
 }
 
-func (m *mockCallback) OnEvent(taskID string, event *Event) error {
+func (m *mockCallback) OnEvent(taskID string, event *opencode.Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -154,7 +155,7 @@ func TestRunner_RealAPI(t *testing.T) {
 	err = runner.Run(ctx, &RunRequest{
 		TaskID: "integration-test",
 		Model:  "grok-code",
-		Messages: []ChatMessage{
+		Messages: []opencode.ChatMessage{
 			{Role: "user", Content: "AI란 무엇인가?"},
 		},
 	})
@@ -228,7 +229,7 @@ func TestRunner_RealAPI_WithCallback(t *testing.T) {
 	err = runner.Run(ctx, &RunRequest{
 		TaskID: "integration-test-callback",
 		Model:  "grok-code",
-		Messages: []ChatMessage{
+		Messages: []opencode.ChatMessage{
 			{Role: "user", Content: "간단히 'Hello, World!'라고만 답해줘."},
 		},
 	})
@@ -327,7 +328,7 @@ func TestRunner_RealAPI_EmptyResponseHandling(t *testing.T) {
 		err := runner.Run(ctx, &RunRequest{
 			TaskID: fmt.Sprintf("integration-test-empty-%d", i),
 			Model:  "grok-code",
-			Messages: []ChatMessage{
+			Messages: []opencode.ChatMessage{
 				{Role: "user", Content: "안녕하세요"},
 			},
 		})

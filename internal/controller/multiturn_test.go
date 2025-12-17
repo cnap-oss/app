@@ -7,6 +7,7 @@ import (
 
 	"github.com/cnap-oss/app/internal/controller"
 	taskrunner "github.com/cnap-oss/app/internal/runner"
+	"github.com/cnap-oss/app/internal/runner/opencode"
 	"github.com/cnap-oss/app/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -226,7 +227,7 @@ func TestOnEventCallback(t *testing.T) {
 
 	// OnEvent 콜백 호출 (Runner가 중간 응답 생성 시 호출하는 것을 시뮬레이션)
 	testMessage := "This is a test message from AI"
-	event := &taskrunner.Event{
+	event := &opencode.Event{
 		Type: "message.part.updated",
 		Properties: map[string]interface{}{
 			"messageID": "test-msg-id",

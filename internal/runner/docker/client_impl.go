@@ -1,4 +1,4 @@
-package taskrunner
+package docker
 
 import (
 	"context"
@@ -11,13 +11,13 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
-// RealDockerClient는 실제 Docker SDK를 사용하는 DockerClient 구현체입니다.
-type RealDockerClient struct {
+// RealClient는 실제 Docker SDK를 사용하는 Client 구현체입니다.
+type RealClient struct {
 	client *client.Client
 }
 
-// NewDockerClient는 새로운 RealDockerClient를 생성합니다.
-func NewDockerClient() (DockerClient, error) {
+// NewClient는 새로운 RealClient를 생성합니다.
+func NewClient() (Client, error) {
 	cli, err := client.NewClientWithOpts(
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -26,11 +26,11 @@ func NewDockerClient() (DockerClient, error) {
 		return nil, fmt.Errorf("docker 클라이언트 생성 실패: %w", err)
 	}
 
-	return &RealDockerClient{client: cli}, nil
+	return &RealClient{client: cli}, nil
 }
 
-// CreateContainer implements DockerClient.
-func (d *RealDockerClient) CreateContainer(ctx context.Context, config ContainerConfig) (string, error) {
+// CreateContainer implements Client.
+func (d *RealClient) CreateContainer(ctx context.Context, config ContainerConfig) (string, error) {
 	// Container 설정 구성
 	containerConfig := &container.Config{
 		Image:  config.Image,
@@ -95,16 +95,16 @@ func (d *RealDockerClient) CreateContainer(ctx context.Context, config Container
 	return resp.ID, nil
 }
 
-// StartContainer implements DockerClient.
-func (d *RealDockerClient) StartContainer(ctx context.Context, containerID string) error {
+// StartContainer implements Client.
+func (d *RealClient) StartContainer(ctx context.Context, containerID string) error {
 	if err := d.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
 		return fmt.Errorf("container 시작 실패: %w", err)
 	}
 	return nil
 }
 
-// StopContainer implements DockerClient.
-func (d *RealDockerClient) StopContainer(ctx context.Context, containerID string, timeout int) error {
+// StopContainer implements Client.
+func (d *RealClient) StopContainer(ctx context.Context, containerID string, timeout int) error {
 	var stopOptions container.StopOptions
 	if timeout > 0 {
 		stopOptions.Timeout = &timeout
@@ -116,8 +116,8 @@ func (d *RealDockerClient) StopContainer(ctx context.Context, containerID string
 	return nil
 }
 
-// RemoveContainer implements DockerClient.
-func (d *RealDockerClient) RemoveContainer(ctx context.Context, containerID string) error {
+// RemoveContainer implements Client.
+func (d *RealClient) RemoveContainer(ctx context.Context, containerID string) error {
 	removeOptions := container.RemoveOptions{
 		Force:         true,
 		RemoveVolumes: false,
@@ -129,8 +129,8 @@ func (d *RealDockerClient) RemoveContainer(ctx context.Context, containerID stri
 	return nil
 }
 
-// ContainerLogs implements DockerClient.
-func (d *RealDockerClient) ContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
+// ContainerLogs implements Client.
+func (d *RealClient) ContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
 	options := container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
@@ -146,8 +146,8 @@ func (d *RealDockerClient) ContainerLogs(ctx context.Context, containerID string
 	return logs, nil
 }
 
-// ContainerInspect implements DockerClient.
-func (d *RealDockerClient) ContainerInspect(ctx context.Context, containerID string) (ContainerInfo, error) {
+// ContainerInspect implements Client.
+func (d *RealClient) ContainerInspect(ctx context.Context, containerID string) (ContainerInfo, error) {
 	inspect, err := d.client.ContainerInspect(ctx, containerID)
 	if err != nil {
 		return ContainerInfo{}, fmt.Errorf("container 조회 실패: %w", err)
@@ -197,8 +197,8 @@ func (d *RealDockerClient) ContainerInspect(ctx context.Context, containerID str
 	return info, nil
 }
 
-// Ping implements DockerClient.
-func (d *RealDockerClient) Ping(ctx context.Context) error {
+// Ping implements Client.
+func (d *RealClient) Ping(ctx context.Context) error {
 	_, err := d.client.Ping(ctx)
 	if err != nil {
 		return fmt.Errorf("docker daemon 연결 실패: %w", err)
@@ -206,8 +206,8 @@ func (d *RealDockerClient) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Close implements DockerClient.
-func (d *RealDockerClient) Close() error {
+// Close implements Client.
+func (d *RealClient) Close() error {
 	if d.client != nil {
 		return d.client.Close()
 	}
@@ -215,7 +215,7 @@ func (d *RealDockerClient) Close() error {
 }
 
 // GetContainerPort는 Container에 매핑된 호스트 포트를 반환합니다.
-func GetContainerPort(ctx context.Context, dockerClient DockerClient, containerID string, containerPort string) (int, error) {
+func GetContainerPort(ctx context.Context, dockerClient Client, containerID string, containerPort string) (int, error) {
 	info, err := dockerClient.ContainerInspect(ctx, containerID)
 	if err != nil {
 		return 0, fmt.Errorf("container 조회 실패: %w", err)
@@ -236,4 +236,4 @@ func GetContainerPort(ctx context.Context, dockerClient DockerClient, containerI
 }
 
 // 인터페이스 구현 확인
-var _ DockerClient = (*RealDockerClient)(nil)
+var _ Client = (*RealClient)(nil)
